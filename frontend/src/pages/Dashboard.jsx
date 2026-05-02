@@ -53,8 +53,8 @@ export default function Dashboard() {
         </div>
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="text-sm text-dark-500 mb-1">覆盖组件</div>
-          <div className="text-3xl font-bold text-primary-700">8</div>
-          <div className="text-xs text-dark-400 mt-1">Spring / Shiro / Log4j2 / Fastjson / Nacos / Druid / Tomcat / Struts2</div>
+          <div className="text-3xl font-bold text-primary-700">18</div>
+          <div className="text-xs text-dark-400 mt-1">Spring / Shiro / Log4j2 / Fastjson / Nacos / Druid / Tomcat / Struts2 / ThinkPHP / WebLogic / Redis / Confluence / F5 / Jenkins / Flink / XXL-JOB / Nginx / Elasticsearch</div>
         </div>
       </div>
 
@@ -99,7 +99,7 @@ export default function Dashboard() {
         <h3 className="font-semibold text-dark-800 mb-4">支持的漏洞模块</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { name: 'Spring Framework', count: 5, icon: '🍃' },
+            { name: 'Spring Framework', count: 7, icon: '🍃' },
             { name: 'Apache Shiro', count: 2, icon: '🔐' },
             { name: 'Log4j2', count: 1, icon: '📝' },
             { name: 'Fastjson', count: 1, icon: '⚡' },
@@ -107,6 +107,16 @@ export default function Dashboard() {
             { name: 'Druid', count: 1, icon: '🐉' },
             { name: 'Tomcat', count: 1, icon: '🐱' },
             { name: 'Struts2', count: 1, icon: '🚀' },
+            { name: 'ThinkPHP', count: 1, icon: '🐘' },
+            { name: 'WebLogic', count: 1, icon: '☕' },
+            { name: 'Redis', count: 1, icon: '🔴' },
+            { name: 'Confluence', count: 1, icon: '📘' },
+            { name: 'F5 BIG-IP', count: 1, icon: '🛡️' },
+            { name: 'Jenkins', count: 1, icon: '🏗️' },
+            { name: 'Apache Flink', count: 1, icon: '🌊' },
+            { name: 'XXL-JOB', count: 1, icon: '⏰' },
+            { name: 'Nginx', count: 1, icon: '🌐' },
+            { name: 'Elasticsearch', count: 1, icon: '🔍' },
           ].map((mod) => (
             <div key={mod.name} className="p-4 bg-gray-50 rounded-lg text-center">
               <div className="text-2xl mb-1">{mod.icon}</div>

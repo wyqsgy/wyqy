@@ -11,6 +11,16 @@ const CATEGORY_LABELS = {
   druid: { name: 'Druid', icon: '🐉', vulns: '监控面板未授权访问' },
   tomcat: { name: 'Tomcat', icon: '🐱', vulns: 'Manager未授权 / 弱口令' },
   struts2: { name: 'Struts2', icon: '🚀', vulns: 'OGNL注入系列' },
+  thinkphp: { name: 'ThinkPHP', icon: '🐘', vulns: '5.x/6.x RCE系列' },
+  weblogic: { name: 'Oracle WebLogic', icon: '☕', vulns: '反序列化 / SSRF / 未授权RCE' },
+  redis: { name: 'Redis', icon: '🔴', vulns: '未授权访问 / CONFIG命令执行' },
+  confluence: { name: 'Confluence', icon: '📘', vulns: 'OGNL注入RCE (CVE-2022-26134)' },
+  f5: { name: 'F5 BIG-IP', icon: '🛡️', vulns: 'iControl REST RCE / TMUI' },
+  jenkins: { name: 'Jenkins', icon: '🏗️', vulns: 'Script Console / 未授权访问 / API泄露' },
+  flink: { name: 'Apache Flink', icon: '🌊', vulns: 'Dashboard未授权 / 任意Jar上传RCE' },
+  xxljob: { name: 'XXL-JOB', icon: '⏰', vulns: '执行器API未授权RCE' },
+  nginx: { name: 'Nginx', icon: '🌐', vulns: '路径穿越 / CRLF注入 / 信息泄露' },
+  elasticsearch: { name: 'Elasticsearch', icon: '🔍', vulns: '未授权访问 / 索引数据泄露' },
 }
 
 export default function NewTask() {

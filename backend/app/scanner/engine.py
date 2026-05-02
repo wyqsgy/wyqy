@@ -1,7 +1,7 @@
 import time
 import asyncio
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from app.scanner.base import VulnResult
 from app.scanner.loader import get_scanners_by_category, get_all_scanners
 from app.ai.classifier import VulnClassifier
@@ -18,6 +18,29 @@ report_gen = AIReportGenerator()
 
 _executor = ThreadPoolExecutor(max_workers=10)
 _running_tasks: dict[str, bool] = {}
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_loop() -> asyncio.AbstractEventLoop | None:
+    global _loop
+    if _loop is None or _loop.is_closed():
+        try:
+            _loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return None
+    return _loop
+
+
+def _broadcast(task_id: str, event: str, data: dict):
+    try:
+        from app.ws.manager import ws_manager
+        loop = _get_loop()
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast_task(task_id, event, data), loop
+            )
+    except Exception:
+        pass
 
 
 def start_scan(task_id: str, target: str, categories: list[str]):
@@ -39,6 +62,9 @@ def _run_scan_sync(task_id: str, target: str, categories: list[str]):
 
         task.status = TaskStatus.RUNNING
         db.commit()
+        _broadcast(task_id, "scan_started", {
+            "target": target, "status": "running", "categories": categories
+        })
 
         target = normalize_url(target)
         scanner_classes = []
@@ -59,7 +85,16 @@ def _run_scan_sync(task_id: str, target: str, categories: list[str]):
             if not _running_tasks.get(task_id, False):
                 task.status = TaskStatus.STOPPED
                 db.commit()
+                _broadcast(task_id, "scan_stopped", {"task_id": task_id})
                 return
+
+            module_name = scanner_cls.module
+            _broadcast(task_id, "scanner_running", {
+                "module": module_name,
+                "index": idx + 1,
+                "total": total,
+                "progress": int((idx + 1) / total * 100),
+            })
 
             try:
                 scanner = scanner_cls(target)
@@ -67,12 +102,33 @@ def _run_scan_sync(task_id: str, target: str, categories: list[str]):
                 all_results.extend(results)
                 task.progress = int((idx + 1) / total * 100)
                 db.commit()
+
+                if results:
+                    for r in results:
+                        _broadcast(task_id, "vuln_found", {
+                            "vuln_id": r.vuln_id,
+                            "name": r.name,
+                            "risk_level": r.risk_level,
+                            "module": r.module,
+                            "category": r.category,
+                        })
+
+                _broadcast(task_id, "progress", {
+                    "progress": task.progress,
+                    "current_module": module_name,
+                    "vulns_found": len(all_results),
+                })
             except Exception as e:
-                logger.warning(f"Scanner {scanner_cls.module} failed: {e}")
+                logger.warning(f"Scanner {module_name} failed: {e}")
                 task.progress = int((idx + 1) / total * 100)
                 db.commit()
+                _broadcast(task_id, "scanner_error", {
+                    "module": module_name, "error": str(e)
+                })
 
         classified_results = []
+        _broadcast(task_id, "ai_analyzing", {"total_vulns": len(all_results)})
+
         for result in all_results:
             ai_result = classifier.classify(
                 response_text=result.response_snippet,
@@ -123,6 +179,16 @@ def _run_scan_sync(task_id: str, target: str, categories: list[str]):
         task.finished_at = datetime.utcnow()
         db.commit()
 
+        _broadcast(task_id, "scan_completed", {
+            "task_id": task_id,
+            "total_vulns": len(all_results),
+            "critical": task.critical_count,
+            "high": task.high_count,
+            "medium": task.medium_count,
+            "low": task.low_count,
+            "duration": str(task.finished_at - task.created_at) if task.created_at else None,
+        })
+
         logger.info(f"Task {task_id} completed: {len(all_results)} vulns found")
 
     except Exception as e:
@@ -133,6 +199,7 @@ def _run_scan_sync(task_id: str, target: str, categories: list[str]):
             task.error_msg = str(e)
             task.finished_at = datetime.utcnow()
             db.commit()
+        _broadcast(task_id, "scan_failed", {"task_id": task_id, "error": str(e)})
     finally:
         _running_tasks.pop(task_id, None)
         db.close()

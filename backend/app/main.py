@@ -4,7 +4,9 @@ warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
-from app.api import tasks, scans, reports
+from app.api import tasks, scans, reports, ws, export, cve
+from app.middleware.exceptions import global_exception_handler
+from app.middleware.request_logger import request_logger_middleware
 from app.utils.logger import get_logger
 
 logger = get_logger("wyqy")
@@ -15,6 +17,8 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.middleware("http")(request_logger_middleware)
+app.add_exception_handler(Exception, global_exception_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,6 +30,9 @@ app.add_middleware(
 app.include_router(tasks.router)
 app.include_router(scans.router)
 app.include_router(reports.router)
+app.include_router(ws.router)
+app.include_router(export.router)
+app.include_router(cve.router)
 
 
 @app.on_event("startup")

@@ -21,6 +21,8 @@ SCAN_CATEGORIES = {
             "spring_actuator",
             "spring_cloud_gateway",
             "spring_cloud_function",
+            "spring_cloud_dataflow",
+            "spring_h2_rce",
         ],
     },
     "shiro": {
@@ -74,6 +76,76 @@ SCAN_CATEGORIES = {
         "modules": [
             "struts2_ognl",
             "struts2_devmode",
+        ],
+    },
+    "thinkphp": {
+        "name": "ThinkPHP",
+        "description": "ThinkPHP框架RCE漏洞",
+        "modules": [
+            "thinkphp_rce",
+        ],
+    },
+    "weblogic": {
+        "name": "Oracle WebLogic",
+        "description": "WebLogic反序列化/SSRF漏洞",
+        "modules": [
+            "weblogic_vuln",
+        ],
+    },
+    "redis": {
+        "name": "Redis",
+        "description": "Redis未授权访问漏洞",
+        "modules": [
+            "redis_unauth",
+        ],
+    },
+    "confluence": {
+        "name": "Atlassian Confluence",
+        "description": "Confluence RCE漏洞",
+        "modules": [
+            "confluence_rce",
+        ],
+    },
+    "f5": {
+        "name": "F5 BIG-IP",
+        "description": "F5 BIG-IP设备漏洞",
+        "modules": [
+            "f5_bigip_rce",
+        ],
+    },
+    "jenkins": {
+        "name": "Jenkins",
+        "description": "Jenkins CI/CD漏洞",
+        "modules": [
+            "jenkins_vuln",
+        ],
+    },
+    "flink": {
+        "name": "Apache Flink",
+        "description": "Flink未授权访问漏洞",
+        "modules": [
+            "flink_unauth",
+        ],
+    },
+    "xxljob": {
+        "name": "XXL-JOB",
+        "description": "XXL-JOB执行器RCE漏洞",
+        "modules": [
+            "xxljob_rce",
+        ],
+    },
+    "nginx": {
+        "name": "Nginx",
+        "description": "Nginx配置错误漏洞",
+        "modules": [
+            "nginx_vuln",
+        ],
+    },
+    "elasticsearch": {
+        "name": "Elasticsearch",
+        "description": "Elasticsearch未授权访问漏洞",
+        "modules": [
+            "elasticsearch_unauth",
         ],
     },
 }
