@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: vulnark-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - vulnark-data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:////app/data/vulnark.db
+      - HTTP_TIMEOUT=10
+      - MAX_CONCURRENT_SCANS=5
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: vulnark-frontend
+    ports:
+      - "3080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  vulnark-data:
