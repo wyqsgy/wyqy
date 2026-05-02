@@ -69,7 +69,7 @@ class ShiroDeserializationScanner(BaseScanner):
 
                 for key in self.DEFAULT_KEYS:
                     try:
-                        test_data = b"test_vulnark_check"
+                        test_data = b"test_wyqy_check"
                         padded_key = base64.b64decode(key)
 
                         from app.utils.helper import md5 as md5_func

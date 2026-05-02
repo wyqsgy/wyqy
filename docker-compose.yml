@@ -3,20 +3,20 @@ version: '3.8'
 services:
   backend:
     build: ./backend
-    container_name: vulnark-backend
+    container_name: wyqy-backend
     ports:
       - "8000:8000"
     volumes:
-      - vulnark-data:/app/data
+      - wyqy-data:/app/data
     environment:
-      - DATABASE_URL=sqlite:////app/data/vulnark.db
+      - DATABASE_URL=sqlite:////app/data/wyqy.db
       - HTTP_TIMEOUT=10
       - MAX_CONCURRENT_SCANS=5
     restart: unless-stopped
 
   frontend:
     build: ./frontend
-    container_name: vulnark-frontend
+    container_name: wyqy-frontend
     ports:
       - "3080:80"
     depends_on:
@@ -24,4 +24,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  vulnark-data:
+  wyqy-data:

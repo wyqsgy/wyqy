@@ -137,7 +137,7 @@ class AIReportGenerator:
             </tr>"""
 
         html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>VulnArk安全扫描报告</title>
+<html><head><meta charset="utf-8"><title>wyqY安全扫描报告</title>
 <style>
 body{{font-family:Arial,sans-serif;margin:40px;background:#f5f5f5}}
 .container{{max-width:1000px;margin:0 auto;background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}}
@@ -151,7 +151,7 @@ tr:nth-child(even){{background:#f9f9f9}}
 .footer{{margin-top:40px;padding-top:20px;border-top:1px solid #eee;color:#888;font-size:12px;text-align:center}}
 </style></head><body>
 <div class="container">
-<h1>🛡️ VulnArk 安全扫描报告</h1>
+<h1>🛡️ wyqY 安全扫描报告</h1>
 <p><strong>扫描目标</strong>: {task_info.get('target', 'N/A')}</p>
 <p><strong>扫描时间</strong>: {task_info.get('created_at', 'N/A')}</p>
 <p><strong>完成时间</strong>: {task_info.get('finished_at', 'N/A')}</p>
@@ -165,7 +165,7 @@ tr:nth-child(even){{background:#f9f9f9}}
 </table>
 
 <div class="footer">
-<p>由 VulnArk AI安全扫描平台 生成 | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+<p>由 wyqY AI安全扫描平台 生成 | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
 </div>
 </div></body></html>"""
         return html

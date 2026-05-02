@@ -7,10 +7,10 @@ from app.database import init_db
 from app.api import tasks, scans, reports
 from app.utils.logger import get_logger
 
-logger = get_logger("vulnark")
+logger = get_logger("wyqy")
 
 app = FastAPI(
-    title="VulnArk",
+    title="wyqY",
     description="AI驱动的框架/中间件漏洞集合自动化验证平台",
     version="1.0.0",
 )
@@ -31,13 +31,13 @@ app.include_router(reports.router)
 @app.on_event("startup")
 def startup():
     init_db()
-    logger.info("VulnArk started successfully")
+    logger.info("wyqY started successfully")
 
 
 @app.get("/")
 def root():
     return {
-        "name": "VulnArk",
+        "name": "wyqY",
         "version": "1.0.0",
         "description": "AI驱动的框架/中间件漏洞集合自动化验证平台",
         "docs": "/docs",

@@ -41,7 +41,7 @@ class SpringCloudGatewayScanner(BaseScanner):
         )
 
         add_route_payload = {
-            "id": "vulnark_test_route",
+            "id": "wyqy_test_route",
             "filters": [{
                 "name": "AddResponseHeader",
                 "args": {
@@ -52,16 +52,16 @@ class SpringCloudGatewayScanner(BaseScanner):
             "uri": "http://example.com",
             "predicates": [{
                 "name": "Path",
-                "args": {"_genkey_0": "/vulnark_test/**"},
+                "args": {"_genkey_0": "/wyqy_test/**"},
             }],
         }
 
-        add_resp = http_request("POST", f"{self.target}/actuator/gateway/routes/vulnark_test_route",
+        add_resp = http_request("POST", f"{self.target}/actuator/gateway/routes/wyqy_test_route",
                                 json=add_route_payload,
                                 headers={"Content-Type": "application/json"})
         if add_resp and add_resp.status_code in [200, 201]:
             refresh_resp = http_request("POST", f"{self.target}/actuator/gateway/refresh")
-            check_resp = http_request("GET", f"{self.target}/actuator/gateway/routes/vulnark_test_route")
+            check_resp = http_request("GET", f"{self.target}/actuator/gateway/routes/wyqy_test_route")
             if check_resp and check_resp.status_code == 200:
                 self.add_result(
                     name="Spring Cloud Gateway SpEL RCE (CVE-2022-22947)",
@@ -74,7 +74,7 @@ class SpringCloudGatewayScanner(BaseScanner):
                     evidence="成功创建恶意路由并刷新网关配置",
                 )
 
-            http_request("DELETE", f"{self.target}/actuator/gateway/routes/vulnark_test_route")
+            http_request("DELETE", f"{self.target}/actuator/gateway/routes/wyqy_test_route")
             http_request("POST", f"{self.target}/actuator/gateway/refresh")
             return True
 

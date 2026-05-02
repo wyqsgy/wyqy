@@ -23,13 +23,13 @@ class Spring4ShellScanner(BaseScanner):
 
     def check(self) -> bool:
         test_param = "class.module.classLoader.resources.context.parent.pipeline.first.pattern"
-        test_marker = "vulnark_spring4shell_test"
+        test_marker = "wyqy_spring4shell_test"
         test_value = f"%{{prefix}}{test_marker}%{{suffix}}"
 
         suffixes = [
             "class.module.classLoader.resources.context.parent.pipeline.first.suffix=.jsp",
             "class.module.classLoader.resources.context.parent.pipeline.first.directory=webapps/ROOT",
-            "class.module.classLoader.resources.context.parent.pipeline.first.prefix=vulnark",
+            "class.module.classLoader.resources.context.parent.pipeline.first.prefix=wyqy",
             "class.module.classLoader.resources.context.parent.pipeline.first.fileDateFormat=",
         ]
 
