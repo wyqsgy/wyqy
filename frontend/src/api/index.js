@@ -25,4 +25,19 @@ export const listCVEs = (params) => api.get('/cve/list', { params })
 export const getCVE = (cveId) => api.get(`/cve/${cveId}`)
 export const getCVEStats = () => api.get('/cve/stats/summary')
 
+export const detectWAF = (data) => api.post('/attack/waf/detect', data)
+export const bypassWAF = (data) => api.post('/attack/waf/bypass', data)
+export const scanSSRF = (data) => api.post('/attack/ssrf/scan', data)
+export const analyzeJWT = (data) => api.post('/attack/jwt/analyze', data)
+export const detectHoneypot = (data) => api.post('/attack/honeypot/detect', data)
+export const smartFuzz = (data) => api.post('/attack/fuzz', data)
+export const scanDeserialization = (data) => api.post('/attack/deserialization/scan', data)
+export const scanPrivesc = () => api.get('/attack/privesc/scan')
+
+export const scanPorts = (data) => api.post('/recon/ports/scan', data)
+export const quickPortScan = (host) => api.post(`/recon/ports/quick?host=${host}`)
+export const fingerprintTarget = (data) => api.post('/recon/fingerprint', data)
+export const enumerateSubdomains = (data) => api.post('/recon/subdomain', data)
+export const quickEnumSubdomains = (domain) => api.get(`/recon/subdomain/quick?domain=${domain}`)
+
 export default api

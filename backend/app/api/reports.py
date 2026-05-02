@@ -63,7 +63,7 @@ def generate_report(task_id: str, db: Session = Depends(get_db)):
     report = Report(
         report_id=report_id,
         task_id=task_id,
-        title=f"wyqY安全扫描报告 - {task.target}",
+        title=f"WyqYan安全扫描报告 - {task.target}",
         summary=summary,
         total_vulns=len(vulns),
         risk_distribution=risk_distribution,
@@ -86,6 +86,19 @@ def generate_report(task_id: str, db: Session = Depends(get_db)):
         "message": "Report generated",
         "data": {"report_id": report_id, "total_vulns": len(vulns)},
     }
+
+
+@router.get("/list/{task_id}")
+def list_reports(task_id: str, db: Session = Depends(get_db)):
+    reports = db.query(Report).filter(Report.task_id == task_id).order_by(Report.created_at.desc()).all()
+    items = [{
+        "report_id": r.report_id,
+        "title": r.title,
+        "total_vulns": r.total_vulns,
+        "created_at": str(r.created_at),
+    } for r in reports]
+
+    return {"code": 200, "data": {"total": len(items), "items": items}}
 
 
 @router.get("/{report_id}")
@@ -116,16 +129,3 @@ def get_report_html(report_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Report not found")
 
     return HTMLResponse(content=report.content_html)
-
-
-@router.get("/list/{task_id}")
-def list_reports(task_id: str, db: Session = Depends(get_db)):
-    reports = db.query(Report).filter(Report.task_id == task_id).order_by(Report.created_at.desc()).all()
-    items = [{
-        "report_id": r.report_id,
-        "title": r.title,
-        "total_vulns": r.total_vulns,
-        "created_at": str(r.created_at),
-    } for r in reports]
-
-    return {"code": 200, "data": {"total": len(items), "items": items}}

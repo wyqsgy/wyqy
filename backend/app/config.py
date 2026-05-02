@@ -5,7 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR / 'wyqy.db'}")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR / 'wyqyan.db'}")
 
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "10"))
 MAX_CONCURRENT_SCANS = int(os.getenv("MAX_CONCURRENT_SCANS", "5"))
@@ -156,4 +156,24 @@ RISK_LEVELS = {
     "medium": {"score": 4, "color": "#ffcc00", "label": "中危"},
     "low": {"score": 1, "color": "#00cc00", "label": "低危"},
     "info": {"score": 0, "color": "#0066ff", "label": "信息"},
+}
+
+AI_CONFIG = {
+    "enabled": os.getenv("AI_ENABLED", "true").lower() == "true",
+    "provider": os.getenv("AI_PROVIDER", "openai"),
+    "api_key": os.getenv("AI_API_KEY", ""),
+    "api_base": os.getenv("AI_API_BASE", "https://api.openai.com/v1"),
+    "model": os.getenv("AI_MODEL", "gpt-3.5-turbo"),
+    "temperature": float(os.getenv("AI_TEMPERATURE", "0.1")),
+    "max_tokens": int(os.getenv("AI_MAX_TOKENS", "1024")),
+    "timeout": int(os.getenv("AI_TIMEOUT", "30")),
+}
+
+AI_CAPABILITIES = {
+    "fingerprint_analysis": True,
+    "intelligent_module_selection": True,
+    "vuln_context_analysis": True,
+    "payload_adaptation": True,
+    "false_positive_detection": True,
+    "report_generation": True,
 }

@@ -2,7 +2,7 @@ import logging
 import sys
 
 
-def get_logger(name="wyqy"):
+def get_logger(name="wyqyan"):
     logger = logging.getLogger(name)
     if not logger.handlers:
         logger.setLevel(logging.INFO)

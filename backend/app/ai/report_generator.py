@@ -24,6 +24,26 @@ class AIReportGenerator:
                 "druid": "Alibaba Druid",
                 "tomcat": "Apache Tomcat",
                 "struts2": "Apache Struts2",
+                "thinkphp": "ThinkPHP",
+                "weblogic": "WebLogic",
+                "redis": "Redis",
+                "confluence": "Confluence",
+                "f5": "F5 BIG-IP",
+                "jenkins": "Jenkins",
+                "flink": "Apache Flink",
+                "xxljob": "XXL-JOB",
+                "nginx": "Nginx",
+                "elasticsearch": "Elasticsearch",
+                "waf": "WAF绕过引擎",
+                "deserialization": "反序列化检测",
+                "ssrf": "SSRF链利用",
+                "jwt": "JWT攻击套件",
+                "honeypot": "蜜罐识别",
+                "fuzzer": "智能模糊测试",
+                "linux_privesc": "Linux提权扫描",
+                "fingerprint": "资产指纹识别",
+                "subdomain": "子域名枚举",
+                "portscan": "端口扫描",
             }
             sections.append(f"**影响组件**: {category_names.get(category, category)}")
 
@@ -137,7 +157,7 @@ class AIReportGenerator:
             </tr>"""
 
         html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>wyqY安全扫描报告</title>
+<html><head><meta charset="utf-8"><title>WyqYan安全扫描报告</title>
 <style>
 body{{font-family:Arial,sans-serif;margin:40px;background:#f5f5f5}}
 .container{{max-width:1000px;margin:0 auto;background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}}
@@ -151,7 +171,7 @@ tr:nth-child(even){{background:#f9f9f9}}
 .footer{{margin-top:40px;padding-top:20px;border-top:1px solid #eee;color:#888;font-size:12px;text-align:center}}
 </style></head><body>
 <div class="container">
-<h1>🛡️ wyqY 安全扫描报告</h1>
+<h1>🛡️ WyqYan 安全扫描报告</h1>
 <p><strong>扫描目标</strong>: {task_info.get('target', 'N/A')}</p>
 <p><strong>扫描时间</strong>: {task_info.get('created_at', 'N/A')}</p>
 <p><strong>完成时间</strong>: {task_info.get('finished_at', 'N/A')}</p>
@@ -165,7 +185,7 @@ tr:nth-child(even){{background:#f9f9f9}}
 </table>
 
 <div class="footer">
-<p>由 wyqY AI安全扫描平台 生成 | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+<p>由 WyqYan AI安全扫描平台 生成 | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
 </div>
 </div></body></html>"""
         return html

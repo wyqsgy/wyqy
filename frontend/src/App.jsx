@@ -7,6 +7,8 @@ import NewTask from './pages/NewTask'
 import TaskDetail from './pages/TaskDetail'
 import Vulnerabilities from './pages/Vulnerabilities'
 import Reports from './pages/Reports'
+import Recon from './pages/Recon'
+import Attack from './pages/Attack'
 
 export default function App() {
   return (
@@ -18,6 +20,8 @@ export default function App() {
         <Route path="/tasks/:taskId" element={<TaskDetail />} />
         <Route path="/vulnerabilities" element={<Vulnerabilities />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/recon" element={<Recon />} />
+        <Route path="/attack" element={<Attack />} />
       </Route>
     </Routes>
   )

@@ -4,15 +4,15 @@ warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
-from app.api import tasks, scans, reports, ws, export, cve
+from app.api import tasks, scans, reports, ws, export, cve, attack, recon
 from app.middleware.exceptions import global_exception_handler
 from app.middleware.request_logger import request_logger_middleware
 from app.utils.logger import get_logger
 
-logger = get_logger("wyqy")
+logger = get_logger("wyqyan")
 
 app = FastAPI(
-    title="wyqY",
+    title="WyqYan",
     description="AI驱动的框架/中间件漏洞集合自动化验证平台",
     version="1.0.0",
 )
@@ -33,18 +33,20 @@ app.include_router(reports.router)
 app.include_router(ws.router)
 app.include_router(export.router)
 app.include_router(cve.router)
+app.include_router(attack.router)
+app.include_router(recon.router)
 
 
 @app.on_event("startup")
 def startup():
     init_db()
-    logger.info("wyqY started successfully")
+    logger.info("WyqYan started successfully")
 
 
 @app.get("/")
 def root():
     return {
-        "name": "wyqY",
+        "name": "WyqYan",
         "version": "1.0.0",
         "description": "AI驱动的框架/中间件漏洞集合自动化验证平台",
         "docs": "/docs",

@@ -53,8 +53,13 @@ export default function Dashboard() {
         </div>
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="text-sm text-dark-500 mb-1">覆盖组件</div>
-          <div className="text-3xl font-bold text-primary-700">18</div>
-          <div className="text-xs text-dark-400 mt-1">Spring / Shiro / Log4j2 / Fastjson / Nacos / Druid / Tomcat / Struts2 / ThinkPHP / WebLogic / Redis / Confluence / F5 / Jenkins / Flink / XXL-JOB / Nginx / Elasticsearch</div>
+          <div className="text-3xl font-bold text-primary-700">27+</div>
+          <div className="text-xs text-dark-400 mt-1">Spring / Shiro / Log4j2 / Fastjson / Nacos / Druid / Tomcat / Struts2 / ThinkPHP / WebLogic / Redis / Confluence / F5 / Jenkins / Flink / XXL-JOB / Nginx / Elasticsearch 等</div>
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="text-sm text-dark-500 mb-1">攻击引擎</div>
+          <div className="text-3xl font-bold text-red-600">8</div>
+          <div className="text-xs text-dark-400 mt-1">WAF绕过 / 反序列化链 / SSRF链利用 / JWT攻击 / 蜜罐识别 / Linux提权 / 智能Fuzz / 模糊测试</div>
         </div>
       </div>
 
@@ -117,6 +122,16 @@ export default function Dashboard() {
             { name: 'XXL-JOB', count: 1, icon: '⏰' },
             { name: 'Nginx', count: 1, icon: '🌐' },
             { name: 'Elasticsearch', count: 1, icon: '🔍' },
+            { name: 'WAF绕过引擎', count: 15, icon: '🛡️' },
+            { name: '反序列化检测', count: 22, icon: '💣' },
+            { name: 'SSRF链利用', count: 6, icon: '🔗' },
+            { name: 'JWT攻击套件', count: 8, icon: '🔑' },
+            { name: '蜜罐识别引擎', count: 13, icon: '🍯' },
+            { name: 'Linux提权扫描', count: 11, icon: '🐧' },
+            { name: '智能模糊测试', count: 9, icon: '💉' },
+            { name: '资产指纹识别', count: 27, icon: '🔎' },
+            { name: '子域名枚举', count: 150, icon: '🌐' },
+            { name: '端口扫描探测', count: 90, icon: '🔌' },
           ].map((mod) => (
             <div key={mod.name} className="p-4 bg-gray-50 rounded-lg text-center">
               <div className="text-2xl mb-1">{mod.icon}</div>

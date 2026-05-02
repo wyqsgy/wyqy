@@ -24,4 +24,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  wyqy-data:
+  wyqyan-data:
