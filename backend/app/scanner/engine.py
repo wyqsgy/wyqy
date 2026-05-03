@@ -2,19 +2,23 @@ import time
 import asyncio
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional
+
 from app.scanner.base import VulnResult
-from app.scanner.loader import get_scanners_by_category, get_all_scanners
+from app.scanner.loader import (
+    get_scanners_by_category, get_all_scanners,
+    get_scanner_by_module, get_registered_categories,
+)
 from app.ai.classifier import VulnClassifier
-from app.ai.report_generator import AIReportGenerator
 from app.database import SessionLocal
 from app.models.task import ScanTask, TaskStatus
 from app.models.vulnerability import Vulnerability
 from app.utils.helper import normalize_url
 from app.utils.logger import get_logger
+from app.core.finger_map import match_modules, get_module_category
 
 logger = get_logger("engine")
 classifier = VulnClassifier()
-report_gen = AIReportGenerator()
 
 _executor = ThreadPoolExecutor(max_workers=10)
 _running_tasks: dict[str, bool] = {}
@@ -43,9 +47,44 @@ def _broadcast(task_id: str, event: str, data: dict):
         pass
 
 
-def start_scan(task_id: str, target: str, categories: list[str]):
+def _resolve_scanner_classes(items: List[str]) -> List[type]:
+    """Resolve scanner classes from mixed list of category names and module names."""
+    scanner_classes: List[type] = []
+    seen_modules: set[str] = set()
+    registered_cats = get_registered_categories()
+
+    for item in items:
+        item = item.strip()
+        if not item:
+            continue
+
+        if item in registered_cats:
+            for cls in get_scanners_by_category(item):
+                if cls.module not in seen_modules:
+                    seen_modules.add(cls.module)
+                    scanner_classes.append(cls)
+        else:
+            cls = get_scanner_by_module(item)
+            if cls and cls.module not in seen_modules:
+                seen_modules.add(cls.module)
+                scanner_classes.append(cls)
+            else:
+                cat = get_module_category(item)
+                if cat in registered_cats:
+                    for cls in get_scanners_by_category(cat):
+                        if cls.module not in seen_modules:
+                            seen_modules.add(cls.module)
+                            scanner_classes.append(cls)
+
+    return scanner_classes
+
+
+def start_scan(task_id: str, target: str, categories: list[str],
+               fingerprint: Optional[dict] = None):
     _running_tasks[task_id] = True
-    future = _executor.submit(_run_scan_sync, task_id, target, categories)
+    future = _executor.submit(
+        _run_scan_sync, task_id, target, categories, fingerprint
+    )
     return future
 
 
@@ -53,7 +92,8 @@ def stop_scan(task_id: str):
     _running_tasks[task_id] = False
 
 
-def _run_scan_sync(task_id: str, target: str, categories: list[str]):
+def _run_scan_sync(task_id: str, target: str, categories: list[str],
+                   fingerprint: Optional[dict] = None):
     db = SessionLocal()
     try:
         task = db.query(ScanTask).filter(ScanTask.task_id == task_id).first()
@@ -67,14 +107,21 @@ def _run_scan_sync(task_id: str, target: str, categories: list[str]):
         })
 
         target = normalize_url(target)
-        scanner_classes = []
 
         if not categories or "all" in categories:
             all_scanners = get_all_scanners()
             scanner_classes = list(all_scanners.values())
         else:
-            for cat in categories:
-                scanner_classes.extend(get_scanners_by_category(cat))
+            scanner_classes = _resolve_scanner_classes(categories)
+
+        if fingerprint:
+            fp_modules = set(match_modules(fingerprint))
+            scanner_classes = [
+                cls for cls in scanner_classes
+                if cls.module in fp_modules
+            ]
+            if not scanner_classes:
+                scanner_classes = _resolve_scanner_classes(categories)
 
         total = len(scanner_classes)
         task.total_checks = total

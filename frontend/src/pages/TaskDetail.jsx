@@ -2,11 +2,29 @@ import React, { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { getTask, getVulnerabilities, generateReport } from '../api'
 
-const statusColors = { pending: 'bg-gray-100 text-gray-600', running: 'bg-blue-100 text-blue-700', completed: 'bg-green-100 text-green-700', failed: 'bg-red-100 text-red-700', stopped: 'bg-yellow-100 text-yellow-700' }
-const statusLabels = { pending: '等待中', running: '扫描中', completed: '已完成', failed: '失败', stopped: '已停止' }
-const riskLabels = { critical: '严重', high: '高危', medium: '中危', low: '低危', info: '信息' }
-const riskBg = { critical: 'bg-red-50 border-red-200', high: 'bg-orange-50 border-orange-200', medium: 'bg-yellow-50 border-yellow-200', low: 'bg-green-50 border-green-200', info: 'bg-blue-50 border-blue-200' }
-const riskBadge = { critical: 'bg-red-500', high: 'bg-orange-500', medium: 'bg-yellow-500', low: 'bg-green-500', info: 'bg-blue-500' }
+const RISK_COLORS = {
+  critical: 'var(--danger)',
+  high: '#ea580c',
+  medium: 'var(--warning)',
+  low: 'var(--info)',
+  info: 'var(--text-dim)',
+}
+
+const RISK_LABELS = {
+  critical: '严重',
+  high: '高危',
+  medium: '中危',
+  low: '低危',
+  info: '信息',
+}
+
+const STATUS_STYLES = {
+  pending: { bg: 'var(--bg-tertiary)', color: 'var(--text-dim)', label: '等待中' },
+  running: { bg: 'var(--info-subtle)', color: 'var(--info)', label: '扫描中' },
+  completed: { bg: 'var(--success-subtle)', color: 'var(--success)', label: '已完成' },
+  failed: { bg: 'var(--danger-subtle)', color: 'var(--danger)', label: '失败' },
+  stopped: { bg: 'var(--warning-subtle)', color: 'var(--warning)', label: '已停止' },
+}
 
 export default function TaskDetail() {
   const { taskId } = useParams()
@@ -15,14 +33,23 @@ export default function TaskDetail() {
   const [expanded, setExpanded] = useState(null)
   const [generatingReport, setGeneratingReport] = useState(false)
 
-  useEffect(() => { loadData(); const t = setInterval(loadData, 3000); return () => clearInterval(t) }, [taskId])
+  useEffect(() => {
+    loadData()
+    const t = setInterval(loadData, 3000)
+    return () => clearInterval(t)
+  }, [taskId])
 
   const loadData = async () => {
     try {
-      const [taskRes, vulnRes] = await Promise.all([getTask(taskId), getVulnerabilities({ task_id: taskId, limit: 200 })])
+      const [taskRes, vulnRes] = await Promise.all([
+        getTask(taskId),
+        getVulnerabilities({ task_id: taskId, limit: 200 }),
+      ])
       setTask(taskRes.data.data)
-      setVulns(vulnRes.data.data.items || [])
-    } catch (e) { console.error(e) }
+      setVulns(vulnRes.data.data?.items || [])
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   const handleGenerateReport = async () => {
@@ -30,79 +57,305 @@ export default function TaskDetail() {
     try {
       const res = await generateReport(taskId)
       alert('报告生成成功！报告ID: ' + res.data.data.report_id)
-    } catch (e) { alert('报告生成失败') }
-    finally { setGeneratingReport(false) }
+    } catch (e) {
+      alert('报告生成失败')
+    } finally {
+      setGeneratingReport(false)
+    }
   }
 
-  if (!task) return <div className="text-center py-12 text-dark-400">加载中...</div>
+  if (!task) {
+    return (
+      <div className="terminal" style={{ height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: 'var(--text-dim)', fontSize: '14px' }}>加载中...</div>
+      </div>
+    )
+  }
+
+  const st = STATUS_STYLES[task.status] || STATUS_STYLES.pending
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: '24px',
+        flexWrap: 'wrap',
+        gap: '12px',
+      }}>
         <div>
-          <h1 className="text-2xl font-bold text-dark-900">任务详情</h1>
-          <p className="text-sm text-dark-400 mt-1">{task.task_id}</p>
-        </div>
-        <div className="flex gap-3">
-          <button onClick={handleGenerateReport} disabled={generatingReport || task.status === 'running'}
-            className="px-4 py-2 bg-primary-700 text-white rounded-lg text-sm hover:bg-primary-800 disabled:opacity-50">
-            {generatingReport ? '生成中...' : '📄 生成报告'}
-          </button>
-          <Link to="/tasks" className="px-4 py-2 bg-gray-200 text-dark-700 rounded-lg text-sm hover:bg-gray-300">返回列表</Link>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          <div><div className="text-xs text-dark-400 mb-1">扫描目标</div><div className="font-medium text-dark-900 break-all">{task.target}</div></div>
-          <div><div className="text-xs text-dark-400 mb-1">状态</div><span className={`px-2 py-1 rounded text-xs font-medium ${statusColors[task.status]}`}>{statusLabels[task.status]}</span></div>
-          <div><div className="text-xs text-dark-400 mb-1">进度</div>
-            <div className="flex items-center gap-2"><div className="flex-1 bg-gray-200 rounded-full h-2"><div className="bg-primary-600 h-2 rounded-full" style={{ width: `${task.progress}%` }}></div></div><span className="text-sm">{task.progress}%</span></div>
+          <div className="sec-title" style={{ marginBottom: '4px' }}>任务详情</div>
+          <div className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '12px' }}>
+            {task.task_id}
           </div>
-          <div><div className="text-xs text-dark-400 mb-1">漏洞总数</div><div className="text-2xl font-bold text-danger">{task.vuln_count}</div></div>
         </div>
-        <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-100">
-          <div className="text-center"><div className="text-lg font-bold text-red-600">{task.critical_count}</div><div className="text-xs text-dark-400">严重</div></div>
-          <div className="text-center"><div className="text-lg font-bold text-orange-500">{task.high_count}</div><div className="text-xs text-dark-400">高危</div></div>
-          <div className="text-center"><div className="text-lg font-bold text-yellow-500">{task.medium_count}</div><div className="text-xs text-dark-400">中危</div></div>
-          <div className="text-center"><div className="text-lg font-bold text-green-600">{task.low_count}</div><div className="text-xs text-dark-400">低危</div></div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleGenerateReport}
+            disabled={generatingReport || task.status === 'running'}
+            className="btn btn-accent"
+          >
+            {generatingReport ? '生成中...' : '生成报告'}
+          </button>
+          <Link to="/tasks" className="btn">返回列表</Link>
         </div>
       </div>
 
-      <h2 className="text-lg font-semibold text-dark-800 mb-4">漏洞列表 ({vulns.length})</h2>
-      <div className="space-y-3">
-        {vulns.map((v) => (
-          <div key={v.vuln_id} className={`bg-white rounded-lg border ${riskBg[v.risk_level] || 'border-gray-200'} overflow-hidden`}>
-            <div className="p-4 cursor-pointer" onClick={() => setExpanded(expanded === v.vuln_id ? null : v.vuln_id)}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className={`px-2 py-1 rounded text-xs font-bold text-white ${riskBadge[v.risk_level]}`}>{riskLabels[v.risk_level]}</span>
-                  <span className="font-medium text-dark-800">{v.name}</span>
-                  <span className="text-xs text-dark-400 bg-gray-100 px-2 py-0.5 rounded">{v.category}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-dark-400">AI置信度: {v.ai_confidence}%</span>
-                  <span className="text-dark-400">{expanded === v.vuln_id ? '▼' : '▶'}</span>
-                </div>
+      <div className="card" style={{ padding: '24px', marginBottom: '24px' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: '20px',
+          marginBottom: '20px',
+        }}>
+          <div>
+            <div className="label-text" style={{ fontSize: '11px', marginBottom: '6px' }}>扫描目标</div>
+            <div className="mono-text" style={{ color: 'var(--text-bright)', fontWeight: 600, wordBreak: 'break-all' }}>
+              {task.target}
+            </div>
+          </div>
+          <div>
+            <div className="label-text" style={{ fontSize: '11px', marginBottom: '6px' }}>状态</div>
+            <span className="pixel-badge" style={{ borderColor: st.color, color: st.color, background: st.bg }}>
+              {st.label}
+            </span>
+          </div>
+          <div>
+            <div className="label-text" style={{ fontSize: '11px', marginBottom: '6px' }}>进度</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div className="pixel-progress" style={{ flex: 1, minWidth: '80px' }}>
+                <div className="pixel-progress-bar" style={{ width: `${task.progress || 0}%` }} />
+              </div>
+              <span className="mono-text" style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                {task.progress || 0}%
+              </span>
+            </div>
+          </div>
+          <div>
+            <div className="label-text" style={{ fontSize: '11px', marginBottom: '6px' }}>漏洞总数</div>
+            <div className="big-number" style={{ color: 'var(--danger)', fontSize: '28px' }}>
+              {task.vuln_count || 0}
+            </div>
+          </div>
+        </div>
+
+        <div className="pixel-divider" />
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '12px',
+        }}>
+          {[
+            { label: '严重', count: task.critical_count || 0, color: 'var(--danger)' },
+            { label: '高危', count: task.high_count || 0, color: '#ea580c' },
+            { label: '中危', count: task.medium_count || 0, color: 'var(--warning)' },
+            { label: '低危', count: task.low_count || 0, color: 'var(--success)' },
+          ].map((item) => (
+            <div key={item.label} style={{
+              textAlign: 'center',
+              padding: '12px',
+              background: 'var(--bg-tertiary)',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+            }}>
+              <div className="big-number" style={{ color: item.color, fontSize: '24px', marginBottom: '4px' }}>
+                {item.count}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                {item.label}
               </div>
             </div>
-            {expanded === v.vuln_id && (
-              <div className="px-4 pb-4 border-t border-gray-100 pt-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div><span className="font-medium text-dark-600">目标URL:</span><div className="text-dark-800 break-all">{v.target_url}</div></div>
-                  <div><span className="font-medium text-dark-600">模块:</span><div className="text-dark-800">{v.module}</div></div>
-                  {v.cve_ids?.length > 0 && <div><span className="font-medium text-dark-600">CVE:</span><div className="text-dark-800">{v.cve_ids.join(', ')}</div></div>}
-                  {v.detail && <div className="md:col-span-2"><span className="font-medium text-dark-600">详细信息:</span><div className="text-dark-800 bg-gray-50 p-3 rounded mt-1">{v.detail}</div></div>}
-                  {v.payload && <div className="md:col-span-2"><span className="font-medium text-dark-600">Payload:</span><pre className="text-xs text-dark-800 bg-gray-900 text-green-400 p-3 rounded mt-1 overflow-x-auto">{v.payload}</pre></div>}
-                  {v.evidence && <div className="md:col-span-2"><span className="font-medium text-dark-600">证据:</span><div className="text-dark-800 bg-green-50 p-3 rounded mt-1">{v.evidence}</div></div>}
-                  {v.fix_suggestion && <div className="md:col-span-2"><span className="font-medium text-dark-600">修复建议:</span><div className="text-dark-800 bg-blue-50 p-3 rounded mt-1">{v.fix_suggestion}</div></div>}
+          ))}
+        </div>
+      </div>
+
+      <div className="sec-subtitle" style={{ marginBottom: '16px', fontWeight: 600, color: 'var(--text-bright)', fontSize: '14px' }}>
+        漏洞列表 ({vulns.length})
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {vulns.map((v) => {
+          const isExpanded = expanded === v.vuln_id
+          const riskColor = RISK_COLORS[v.risk_level] || 'var(--text-dim)'
+          return (
+            <div
+              key={v.vuln_id}
+              className="card"
+              style={{
+                borderColor: isExpanded ? riskColor : 'var(--border-color)',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                onClick={() => setExpanded(isExpanded ? null : v.vuln_id)}
+                style={{
+                  padding: '14px 16px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span className="badge" style={{
+                    background: `${riskColor}20`,
+                    color: riskColor,
+                  }}>
+                    {RISK_LABELS[v.risk_level] || '信息'}
+                  </span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-bright)', fontSize: '14px' }}>
+                    {v.name || v.title || '未知漏洞'}
+                  </span>
+                  {v.category && (
+                    <span style={{
+                      fontSize: '11px',
+                      color: 'var(--text-dim)',
+                      background: 'var(--bg-tertiary)',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                    }}>
+                      {v.category}
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {v.ai_confidence != null && (
+                    <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
+                      AI: {v.ai_confidence}%
+                    </span>
+                  )}
+                  <span style={{ color: 'var(--text-dim)', fontSize: '12px' }}>
+                    {isExpanded ? '收起' : '展开'}
+                  </span>
                 </div>
               </div>
-            )}
-          </div>
-        ))}
+
+              {isExpanded && (
+                <div style={{
+                  padding: '0 16px 16px',
+                  borderTop: '1px solid var(--border-color)',
+                }}>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                    gap: '12px',
+                    paddingTop: '14px',
+                    fontSize: '13px',
+                  }}>
+                    {v.target_url && (
+                      <div>
+                        <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px' }}>目标URL</div>
+                        <div className="mono-text" style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                          {v.target_url}
+                        </div>
+                      </div>
+                    )}
+                    {v.module && (
+                      <div>
+                        <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px' }}>检测模块</div>
+                        <div style={{ color: 'var(--accent)', fontWeight: 600 }}>{v.module}</div>
+                      </div>
+                    )}
+                    {v.cve_ids?.length > 0 && (
+                      <div>
+                        <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px' }}>CVE 编号</div>
+                        <div style={{ color: 'var(--warning)', fontWeight: 600 }}>
+                          {v.cve_ids.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {v.detail && (
+                    <div style={{ marginTop: '12px' }}>
+                      <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '6px' }}>详细信息</div>
+                      <div style={{
+                        background: 'var(--bg-tertiary)',
+                        padding: '12px',
+                        borderRadius: '6px',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        lineHeight: '1.6',
+                        border: '1px solid var(--border-color)',
+                      }}>
+                        {v.detail}
+                      </div>
+                    </div>
+                  )}
+
+                  {v.payload && (
+                    <div style={{ marginTop: '12px' }}>
+                      <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '6px' }}>Payload</div>
+                      <pre style={{
+                        background: 'var(--bg-primary)',
+                        padding: '12px',
+                        borderRadius: '6px',
+                        color: 'var(--success)',
+                        fontSize: '12px',
+                        overflowX: 'auto',
+                        border: '1px solid var(--border-color)',
+                        fontFamily: 'var(--font-body)',
+                        lineHeight: '1.5',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                      }}>
+                        {v.payload}
+                      </pre>
+                    </div>
+                  )}
+
+                  {v.evidence && (
+                    <div style={{ marginTop: '12px' }}>
+                      <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '6px' }}>证据</div>
+                      <div style={{
+                        background: 'var(--success-subtle)',
+                        padding: '12px',
+                        borderRadius: '6px',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        lineHeight: '1.6',
+                        border: '1px solid var(--border-color)',
+                      }}>
+                        {v.evidence}
+                      </div>
+                    </div>
+                  )}
+
+                  {v.fix_suggestion && (
+                    <div style={{ marginTop: '12px' }}>
+                      <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '6px' }}>修复建议</div>
+                      <div style={{
+                        background: 'var(--info-subtle)',
+                        padding: '12px',
+                        borderRadius: '6px',
+                        color: 'var(--text-primary)',
+                        fontSize: '13px',
+                        lineHeight: '1.6',
+                        border: '1px solid var(--border-color)',
+                      }}>
+                        {v.fix_suggestion}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
         {vulns.length === 0 && task.status !== 'running' && (
-          <div className="bg-white rounded-lg p-12 text-center text-dark-400 border border-gray-100">未发现漏洞</div>
+          <div className="terminal" style={{
+            textAlign: 'center',
+            padding: '60px 20px',
+          }}>
+            <div style={{ color: 'var(--text-dim)', fontSize: '14px' }}>
+              未发现漏洞
+            </div>
+          </div>
         )}
       </div>
     </div>

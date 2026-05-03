@@ -1,34 +1,36 @@
 import React, { useState } from 'react'
 import { enumerateSubdomains, scanPorts, fingerprintTarget } from '../api'
 
-const RECON_MODULES = [
+const MODULES = [
   {
     id: 'subdomain',
-    name: 'SUBDOMAIN',
-    icon: '[@]',
-    desc: 'Multi-source subdomain enumeration with 150+ DNS servers and brute-force',
-    params: [{ name: 'domain', label: 'DOMAIN', placeholder: 'example.com' }],
+    name: '子域名枚举',
+    icon: '@',
+    desc: '被动信息收集 + DNS 爆破 + crt.sh + rapid7 多源枚举',
+    params: [{ name: 'domain', label: '目标域名', placeholder: 'example.com' }],
   },
   {
     id: 'port',
-    name: 'PORT SCAN',
-    icon: '[#]',
-    desc: 'Multi-threaded port scanning with service detection for 90+ common ports',
-    params: [{ name: 'target', label: 'TARGET', placeholder: '192.168.1.1' }],
+    name: '端口扫描',
+    icon: '#',
+    desc: 'TCP 连接扫描 + 服务 Banner 抓取 + nmap 风格指纹检测',
+    params: [
+      { name: 'target', label: '目标主机', placeholder: '192.168.1.1' },
+      { name: 'ports', label: '端口范围', placeholder: '1-1000' },
+    ],
   },
   {
     id: 'fingerprint',
-    name: 'FINGERPRINT',
-    icon: '[~]',
-    desc: 'Web technology fingerprinting with 27+ categories and version detection',
-    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+    name: 'Web 指纹识别',
+    icon: '~',
+    desc: 'Web 技术检测、框架版本、语言识别、中间件、WAF、CDN 识别',
+    params: [{ name: 'target', label: '目标地址', placeholder: 'https://target.com' }],
   },
 ]
 
 export default function Recon() {
   const [activeModule, setActiveModule] = useState(null)
   const [formData, setFormData] = useState({})
-  const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [terminalLines, setTerminalLines] = useState([])
 
@@ -39,68 +41,44 @@ export default function Recon() {
   const handleRun = async () => {
     if (!activeModule) return
     setLoading(true)
-    setResults(null)
     setTerminalLines([])
 
-    const mod = RECON_MODULES.find((m) => m.id === activeModule)
+    const mod = MODULES.find((m) => m.id === activeModule)
     addLine(`$ wyqyan recon ${activeModule} ${Object.entries(formData).map(([k, v]) => `--${k} ${v}`).join(' ')}`, 'prompt')
-    addLine(`[INFO] Starting ${mod.name} reconnaissance...`, 'info')
+    addLine(`正在启动 ${mod.name}...`, 'info')
 
     try {
-      const apiMap = {
-        subdomain: () => enumerateSubdomains({ domain: formData.domain }),
-        port: () => scanPorts({ target: formData.target }),
-        fingerprint: () => fingerprintTarget({ target: formData.target }),
+      let res
+      if (activeModule === 'subdomain') {
+        res = await enumerateSubdomains({ domain: formData.domain })
+      } else if (activeModule === 'port') {
+        res = await scanPorts({ host: formData.target, ports: formData.ports })
+      } else if (activeModule === 'fingerprint') {
+        res = await fingerprintTarget({ target_url: formData.target })
       }
-      const apiFn = apiMap[activeModule]
-      if (!apiFn) throw new Error('Unknown module')
-      const res = await apiFn()
+
       const data = res.data?.data || res.data || {}
+      addLine(`${mod.name} 执行完成`, 'success')
 
-      addLine(`[OK] ${mod.name} completed`, 'success')
-
-      if (data.subdomains?.length) {
-        addLine(`[+] Found ${data.subdomains.length} subdomains`, 'warning')
-        data.subdomains.slice(0, 20).forEach((s) => {
-          const sub = typeof s === 'string' ? s : s.subdomain || s.domain || JSON.stringify(s)
-          addLine(`  ${sub}`, 'output')
-        })
-        if (data.subdomains.length > 20) {
-          addLine(`  ... and ${data.subdomains.length - 20} more`, 'info')
-        }
+      if (activeModule === 'subdomain' && data.subdomains?.length) {
+        addLine(`发现 ${data.subdomains.length} 个子域名`, 'warning')
+        data.subdomains.forEach((s) => addLine(`  ${s.subdomain} -> ${s.ip || '未知'}`, 'output'))
+      } else if (activeModule === 'port' && data.open_ports?.length) {
+        addLine(`发现 ${data.open_ports.length} 个开放端口`, 'warning')
+        data.open_ports.forEach((p) => addLine(`  ${p.port}/${p.proto} ${p.state} ${p.service || ''}`, 'output'))
+      } else if (activeModule === 'fingerprint') {
+        const fw = (data.framework || []).map((f) => f.name).join(', ') || '未知'
+        const lg = (data.language || []).map((l) => l.name).join(', ') || '未知'
+        const mw = (data.middleware || []).map((m) => m.name).join(', ') || '未知'
+        addLine(`框架     : ${fw}`, 'output')
+        addLine(`语言     : ${lg}`, 'output')
+        addLine(`中间件   : ${mw}`, 'output')
+        if (data.headers) addLine(`服务器   : ${data.headers.server || '未知'}`, 'output')
+      } else {
+        addLine('未发现结果', 'info')
       }
-
-      if (data.ports?.length) {
-        addLine(`[+] Found ${data.ports.length} open ports`, 'warning')
-        data.ports.slice(0, 20).forEach((p) => {
-          const port = typeof p === 'object' ? `${p.port}/${p.protocol || 'tcp'} - ${p.service || 'unknown'}` : p
-          addLine(`  ${port}`, 'output')
-        })
-      }
-
-      if (data.fingerprints?.length) {
-        addLine(`[+] Identified ${data.fingerprints.length} technologies`, 'warning')
-        data.fingerprints.slice(0, 15).forEach((f) => {
-          const fp = typeof f === 'string' ? f : `${f.name || f.tech} ${f.version || ''}`
-          addLine(`  ${fp}`, 'output')
-        })
-      }
-
-      if (data.technologies?.length) {
-        addLine(`[+] Identified ${data.technologies.length} technologies`, 'warning')
-        data.technologies.slice(0, 15).forEach((t) => {
-          const tech = typeof t === 'string' ? t : `${t.name || t.tech} ${t.version || ''}`
-          addLine(`  ${tech}`, 'output')
-        })
-      }
-
-      if (!data.subdomains?.length && !data.ports?.length && !data.fingerprints?.length && !data.technologies?.length) {
-        addLine(`[INFO] No results returned`, 'info')
-      }
-
-      setResults(data)
     } catch (e) {
-      addLine(`[ERROR] ${e.response?.data?.detail || e.message}`, 'error')
+      addLine(`ERROR: ${e.response?.data?.detail || e.message}`, 'error')
     } finally {
       setLoading(false)
       addLine('$ _', 'prompt')
@@ -109,14 +87,7 @@ export default function Recon() {
 
   return (
     <div>
-      <div className="pixel-text" style={{
-        fontSize: '14px',
-        color: 'var(--text-bright)',
-        textShadow: '0 0 10px var(--accent-glow)',
-        marginBottom: '24px',
-      }}>
-        // RECONNAISSANCE
-      </div>
+      <div className="sec-title" style={{ marginBottom: '24px' }}>信息收集</div>
 
       <div style={{
         display: 'grid',
@@ -124,27 +95,27 @@ export default function Recon() {
         gap: '12px',
         marginBottom: '24px',
       }}>
-        {RECON_MODULES.map((mod) => (
+        {MODULES.map((mod) => (
           <div
             key={mod.id}
-            className="pixel-card"
-            onClick={() => { setActiveModule(mod.id); setFormData({}); setResults(null); setTerminalLines([]) }}
+            className="card"
+            onClick={() => { setActiveModule(mod.id); setFormData({}); setTerminalLines([]) }}
             style={{
               padding: '16px',
               cursor: 'pointer',
-              borderColor: activeModule === mod.id ? 'var(--border-glow)' : 'var(--border-color)',
-              boxShadow: activeModule === mod.id ? '0 0 20px var(--shadow-color)' : '0 0 10px var(--shadow-color)',
+              borderColor: activeModule === mod.id ? 'var(--accent)' : 'var(--border-color)',
+              background: activeModule === mod.id ? 'var(--accent-subtle)' : 'var(--bg-card)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-              <span className="mono-text" style={{ color: 'var(--accent)', fontSize: '16px', marginRight: '8px' }}>
-                {mod.icon}
+              <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-title)', fontSize: '16px', marginRight: '10px' }}>
+                [{mod.icon}]
               </span>
-              <span className="pixel-text-sm" style={{ color: 'var(--text-bright)' }}>
+              <span style={{ color: 'var(--text-bright)', fontWeight: 600, fontSize: '14px' }}>
                 {mod.name}
               </span>
             </div>
-            <div className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '11px', lineHeight: '1.5' }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.5' }}>
               {mod.desc}
             </div>
           </div>
@@ -152,14 +123,14 @@ export default function Recon() {
       </div>
 
       {activeModule && (
-        <div className="pixel-card" style={{ padding: '20px', marginBottom: '24px' }}>
-          <div className="pixel-text-sm" style={{ color: 'var(--text-bright)', marginBottom: '16px' }}>
-            [ {RECON_MODULES.find((m) => m.id === activeModule)?.name} CONFIG ]
+        <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
+          <div style={{ color: 'var(--text-bright)', fontWeight: 600, fontSize: '14px', marginBottom: '16px' }}>
+            {MODULES.find((m) => m.id === activeModule)?.name} 配置
           </div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            {RECON_MODULES.find((m) => m.id === activeModule)?.params.map((param) => (
+            {MODULES.find((m) => m.id === activeModule)?.params.map((param) => (
               <div key={param.name} style={{ flex: '1', minWidth: '200px' }}>
-                <div className="pixel-text-sm" style={{ color: 'var(--text-dim)', marginBottom: '6px' }}>
+                <div className="label-text" style={{ marginBottom: '6px', fontSize: '11px' }}>
                   {param.label}
                 </div>
                 <input
@@ -171,22 +142,22 @@ export default function Recon() {
               </div>
             ))}
             <button
-              className="pixel-btn pixel-btn-accent"
+              className="btn btn-accent"
               onClick={handleRun}
               disabled={loading}
               style={{ minWidth: '120px' }}
             >
-              {loading ? 'SCANNING...' : '[ EXECUTE ]'}
+              {loading ? '执行中...' : '执行'}
             </button>
           </div>
         </div>
       )}
 
       {terminalLines.length > 0 && (
-        <div className="pixel-terminal" style={{ maxHeight: '500px', minHeight: '200px' }}>
+        <div className="terminal" style={{ maxHeight: '500px', minHeight: '200px' }}>
           {terminalLines.map((line, i) => (
             <div key={i} className={`line ${line.type}`}>
-              <span className="mono-text" style={{ color: 'var(--text-dim)', marginRight: '8px', fontSize: '10px' }}>
+              <span style={{ color: 'var(--text-dim)', marginRight: '8px', fontSize: '11px' }}>
                 [{line.time}]
               </span>
               {line.text}
@@ -196,9 +167,9 @@ export default function Recon() {
       )}
 
       {!activeModule && !terminalLines.length && (
-        <div className="pixel-terminal" style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="mono-text" style={{ color: 'var(--text-dim)' }}>
-            $ select a recon module above to begin...
+        <div className="terminal" style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: '14px' }}>
+            选择上方侦察模块开始...
           </div>
         </div>
       )}

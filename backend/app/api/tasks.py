@@ -14,6 +14,8 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 class CreateTaskRequest(BaseModel):
     target: str
     categories: list[str] = ["all"]
+    scan_type: str = "quick"
+    modules: list[str] | None = None
 
 
 class TaskResponse(BaseModel):
@@ -38,17 +40,26 @@ class TaskResponse(BaseModel):
 @router.post("")
 def create_task(req: CreateTaskRequest, db: Session = Depends(get_db)):
     task_id = gen_task_id()
+
+    categories = req.categories
+    if req.modules:
+        categories = req.modules
+    elif req.scan_type == "recon":
+        categories = ["recon"]
+    elif req.scan_type == "stealth":
+        categories = ["all"]
+
     task = ScanTask(
         task_id=task_id,
         target=req.target,
-        categories=req.categories,
+        categories=categories,
         status=TaskStatus.PENDING,
     )
     db.add(task)
     db.commit()
     db.refresh(task)
 
-    start_scan(task_id, req.target, req.categories)
+    start_scan(task_id, req.target, categories)
 
     return {
         "code": 200,

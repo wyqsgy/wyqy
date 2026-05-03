@@ -1,148 +1,125 @@
 import React, { useState, useEffect } from 'react'
 import { getVulnerabilities } from '../api'
 
-const RISK_STYLES = {
-  critical: { color: 'var(--danger)', glow: 'var(--danger-glow)', label: 'CRIT' },
-  high: { color: '#ff6600', glow: '#ff660080', label: 'HIGH' },
-  medium: { color: 'var(--warning)', glow: 'var(--warning-glow)', label: 'MED' },
-  low: { color: 'var(--info)', glow: 'rgba(0,204,255,0.5)', label: 'LOW' },
-  info: { color: 'var(--text-dim)', glow: 'transparent', label: 'INFO' },
+const RISK_COLORS = {
+  critical: 'var(--danger)',
+  high: '#ea580c',
+  medium: 'var(--warning)',
+  low: 'var(--info)',
+  info: 'var(--text-dim)',
+}
+
+const RISK_LABELS = {
+  critical: '严重',
+  high: '高危',
+  medium: '中危',
+  low: '低危',
+  info: '信息',
 }
 
 export default function Vulnerabilities() {
   const [vulns, setVulns] = useState([])
   const [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
   const [filter, setFilter] = useState('all')
 
-  useEffect(() => { loadVulns() }, [page, filter])
+  useEffect(() => { loadVulns() }, [])
 
   const loadVulns = async () => {
-    setLoading(true)
     try {
-      const params = { page, limit: 20 }
-      if (filter !== 'all') params.risk_level = filter
-      const res = await getVulnerabilities(params)
+      const res = await getVulnerabilities({ limit: 200 })
       setVulns(res.data.data?.items || [])
-      setTotal(res.data.data?.total || 0)
     } catch (e) {
-      console.error('Vulns load error:', e)
+      console.error(e)
     } finally {
       setLoading(false)
     }
   }
 
+  const filtered = filter === 'all' ? vulns : vulns.filter((v) => v.risk_level === filter)
+
+  const riskCounts = vulns.reduce((acc, v) => {
+    acc[v.risk_level] = (acc[v.risk_level] || 0) + 1
+    return acc
+  }, {})
+
+  const filterTabs = [
+    { id: 'all', label: `全部 (${vulns.length})` },
+    { id: 'critical', label: `严重 (${riskCounts.critical || 0})` },
+    { id: 'high', label: `高危 (${riskCounts.high || 0})` },
+    { id: 'medium', label: `中危 (${riskCounts.medium || 0})` },
+    { id: 'low', label: `低危 (${riskCounts.low || 0})` },
+  ]
+
+  if (loading) {
+    return (
+      <div className="terminal" style={{ height: '300px' }}>
+        <div className="line prompt">$ 正在加载漏洞列表...</div>
+        <div className="line cursor">_</div>
+      </div>
+    )
+  }
+
   return (
     <div>
-      <div className="pixel-text" style={{
-        fontSize: '14px',
-        color: 'var(--text-bright)',
-        textShadow: '0 0 10px var(--accent-glow)',
-        marginBottom: '24px',
-      }}>
-        // VULNERABILITIES
+      <div className="sec-title" style={{ marginBottom: '16px' }}>漏洞列表</div>
+
+      <div className="pixel-tabs" style={{ marginBottom: '16px' }}>
+        {filterTabs.map((tab) => (
+          <button
+            key={tab.id}
+            className={`pixel-tab ${filter === tab.id ? 'active' : ''}`}
+            onClick={() => setFilter(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        {['all', 'critical', 'high', 'medium', 'low', 'info'].map((level) => {
-          const st = RISK_STYLES[level] || { color: 'var(--text-dim)', label: level.toUpperCase() }
-          return (
-            <button
-              key={level}
-              className="pixel-btn"
-              onClick={() => { setFilter(level); setPage(1) }}
-              style={{
-                borderColor: filter === level ? st.color : 'var(--border-color)',
-                color: filter === level ? st.color : 'var(--text-dim)',
-                boxShadow: filter === level ? `0 0 8px ${st.glow || 'transparent'}` : 'none',
-              }}
-            >
-              {st.label || level.toUpperCase()}
-            </button>
-          )
-        })}
-      </div>
-
-      <div className="pixel-card" style={{ padding: '0', overflow: 'hidden' }}>
-        <div className="pixel-table">
-          <table>
+      {filtered.length === 0 ? (
+        <div className="terminal" style={{ textAlign: 'center', padding: '60px 20px' }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: '14px' }}>
+            {vulns.length === 0 ? '暂无漏洞' : '当前筛选条件下无漏洞'}
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <table className="pixel-table">
             <thead>
               <tr>
-                <th>RISK</th>
-                <th>TYPE</th>
-                <th>TARGET</th>
-                <th>DETAIL</th>
-                <th>TIME</th>
+                <th>风险等级</th>
+                <th>检测模块</th>
+                <th>漏洞标题</th>
+                <th>目标</th>
+                <th>描述</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '40px' }}>
-                    <span className="mono-text" style={{ color: 'var(--text-dim)' }}>LOADING...</span>
+              {filtered.map((v, i) => (
+                <tr key={v.id || i}>
+                  <td data-label="风险等级">
+                    <span className="badge" style={{
+                      background: `${RISK_COLORS[v.risk_level] || 'var(--text-dim)'}20`,
+                      color: RISK_COLORS[v.risk_level] || 'var(--text-dim)',
+                    }}>
+                      {RISK_LABELS[v.risk_level] || '信息'}
+                    </span>
+                  </td>
+                  <td data-label="检测模块" style={{ fontSize: '12px', color: 'var(--accent)' }}>{v.module || '-'}</td>
+                  <td data-label="漏洞标题" style={{ fontWeight: 600, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {v.title || v.type || '-'}
+                  </td>
+                  <td data-label="目标" style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                    {v.target || '-'}
+                  </td>
+                  <td data-label="描述" style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                    {v.description || v.detail || '-'}
                   </td>
                 </tr>
-              ) : vulns.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '40px' }}>
-                    <span className="mono-text" style={{ color: 'var(--text-dim)' }}>NO VULNERABILITIES</span>
-                  </td>
-                </tr>
-              ) : (
-                vulns.map((v) => {
-                  const st = RISK_STYLES[v.risk_level] || RISK_STYLES.info
-                  return (
-                    <tr key={v.id || v.vuln_id}>
-                      <td>
-                        <span className="pixel-badge" style={{
-                          borderColor: st.color,
-                          color: st.color,
-                          boxShadow: `0 0 6px ${st.glow}`,
-                        }}>
-                          {st.label}
-                        </span>
-                      </td>
-                      <td className="pixel-text-sm" style={{ color: 'var(--text-primary)' }}>
-                        {v.vuln_type || 'UNKNOWN'}
-                      </td>
-                      <td className="mono-text" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-                        {v.target?.substring(0, 40) || 'N/A'}
-                      </td>
-                      <td className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '11px', maxWidth: '300px' }}>
-                        {v.detail?.substring(0, 80) || v.description?.substring(0, 80) || 'N/A'}
-                      </td>
-                      <td className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '10px' }}>
-                        {v.found_at ? new Date(v.found_at).toLocaleString() : 'N/A'}
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
+              ))}
             </tbody>
           </table>
         </div>
-
-        {total > 20 && (
-          <div style={{
-            padding: '12px',
-            borderTop: '2px solid var(--border-color)',
-            display: 'flex',
-            justifyContent: 'center',
-            gap: '8px',
-          }}>
-            <button className="pixel-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              &lt; PREV
-            </button>
-            <span className="pixel-text-sm" style={{ color: 'var(--text-dim)', padding: '8px 12px' }}>
-              PAGE {page} / {Math.ceil(total / 20)}
-            </span>
-            <button className="pixel-btn" disabled={page >= Math.ceil(total / 20)} onClick={() => setPage(page + 1)}>
-              NEXT &gt;
-            </button>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   )
 }

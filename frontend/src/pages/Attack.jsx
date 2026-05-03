@@ -4,54 +4,54 @@ import { detectWAF, scanDeserialization, scanSSRF, analyzeJWT, smartFuzz, detect
 const ENGINES = [
   {
     id: 'waf',
-    name: 'WAF BYPASS',
-    icon: '[*]',
-    desc: 'WAF detection with 20+ signatures and 25+ evasion techniques',
-    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+    name: 'WAF 绕过',
+    icon: '*',
+    desc: 'WAF 检测 20+ 签名 + 25+ 绕过技术，含编码链、分块传输、参数污染',
+    params: [{ name: 'target', label: '目标地址', placeholder: 'https://target.com' }],
   },
   {
     id: 'deserial',
-    name: 'DESERIALIZATION',
-    icon: '[!]',
-    desc: 'Java/PHP/Python/.NET deserialization chain detection with 24+ gadget chains',
-    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+    name: '反序列化检测',
+    icon: '!',
+    desc: 'Java/PHP/Python/.NET 反序列化链检测，24+ Gadget Chain，支持 Shiro/Fastjson',
+    params: [{ name: 'target', label: '目标地址', placeholder: 'https://target.com' }],
   },
   {
     id: 'ssrf',
-    name: 'SSRF CHAIN',
-    icon: '[@]',
-    desc: 'Multi-layer SSRF detection with cloud metadata exploitation and protocol chains',
-    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+    name: 'SSRF 链利用',
+    icon: '@',
+    desc: '多层 SSRF 检测 + 云元数据利用 + gopher 协议链 + DNS Rebinding',
+    params: [{ name: 'target', label: '目标地址', placeholder: 'https://target.com' }],
   },
   {
     id: 'jwt',
-    name: 'JWT ATTACK',
-    icon: '[#]',
-    desc: 'Algorithm confusion, key brute-force, header injection, and claim tampering',
-    params: [{ name: 'token', label: 'JWT TOKEN', placeholder: 'eyJhbGciOi...' }],
+    name: 'JWT 攻击',
+    icon: '#',
+    desc: '算法混淆、弱密钥爆破、Header 注入、Claim 篡改、JWK/JKU 注入',
+    params: [{ name: 'token', label: 'JWT Token', placeholder: 'eyJhbGciOi...' }],
   },
   {
     id: 'fuzz',
-    name: 'SMART FUZZ',
-    icon: '[~]',
-    desc: 'Response diff analysis + WAF adaptive mutation + parameter auto-discovery',
+    name: '智能模糊测试',
+    icon: '~',
+    desc: '响应差异分析 + WAF 自适应变异 + 参数自动发现 + 漏洞精准探测',
     params: [
-      { name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' },
-      { name: 'mode', label: 'MODE', type: 'select', options: ['deep', 'quick'] },
+      { name: 'target', label: '目标地址', placeholder: 'https://target.com' },
+      { name: 'mode', label: '扫描模式', type: 'select', options: ['deep', 'quick'] },
     ],
   },
   {
     id: 'honeypot',
-    name: 'HONEYPOT DETECT',
-    icon: '[?]',
-    desc: '30+ honeypot signatures with active deception and latency anomaly detection',
-    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+    name: '蜜罐识别',
+    icon: '?',
+    desc: '30+ 蜜罐特征签名 + 主动欺骗检测 + 时延异常分析 + SSL 指纹',
+    params: [{ name: 'target', label: '目标地址', placeholder: 'https://target.com' }],
   },
   {
     id: 'privesc',
-    name: 'LINUX PRIVESC',
-    icon: '[>]',
-    desc: 'LinPEAS-style detection with 280+ GTFOBins and 20+ kernel exploit matching',
+    name: 'Linux 提权扫描',
+    icon: '>',
+    desc: 'LinPEAS 风格检测 + 280+ GTFOBins + 20+ 内核漏洞匹配 + SUID/Sudo 扫描',
     params: [],
   },
 ]
@@ -59,7 +59,6 @@ const ENGINES = [
 export default function Attack() {
   const [activeEngine, setActiveEngine] = useState(null)
   const [formData, setFormData] = useState({})
-  const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [terminalLines, setTerminalLines] = useState([])
 
@@ -70,21 +69,20 @@ export default function Attack() {
   const handleRun = async () => {
     if (!activeEngine) return
     setLoading(true)
-    setResults(null)
     setTerminalLines([])
 
     const engine = ENGINES.find((e) => e.id === activeEngine)
     addLine(`$ wyqyan attack ${activeEngine} ${Object.entries(formData).map(([k, v]) => `--${k} ${v}`).join(' ')}`, 'prompt')
-    addLine(`[INFO] Starting ${engine.name} engine...`, 'info')
+    addLine(`正在启动 ${engine.name} 引擎...`, 'info')
 
     try {
       const apiMap = {
-        waf: () => detectWAF({ target: formData.target }),
-        deserial: () => scanDeserialization({ target: formData.target }),
-        ssrf: () => scanSSRF({ target: formData.target }),
+        waf: () => detectWAF({ target_url: formData.target }),
+        deserial: () => scanDeserialization({ target_url: formData.target }),
+        ssrf: () => scanSSRF({ target_url: formData.target }),
         jwt: () => analyzeJWT({ token: formData.token }),
-        fuzz: () => smartFuzz({ target: formData.target, mode: formData.mode || 'deep' }),
-        honeypot: () => detectHoneypot({ target: formData.target }),
+        fuzz: () => smartFuzz({ target_url: formData.target, timeout: 10 }),
+        honeypot: () => detectHoneypot({ target_url: formData.target }),
         privesc: () => scanPrivesc(),
       }
       const apiFn = apiMap[activeEngine]
@@ -92,33 +90,35 @@ export default function Attack() {
       const res = await apiFn()
       const data = res.data?.data || res.data || {}
 
-      addLine(`[OK] ${engine.name} completed`, 'success')
+      addLine(`${engine.name} 执行完成`, 'success')
 
-      if (data.findings?.length) {
-        addLine(`[+] Found ${data.findings.length} issue(s)`, 'warning')
-        data.findings.forEach((f) => {
-          const riskTag = (f.risk_level || f.risk || 'info').toUpperCase()
-          addLine(`  [${riskTag}] ${f.type || f.detail || JSON.stringify(f)}`, f.risk_level === 'critical' ? 'error' : 'warning')
+      const findings = data.findings || []
+      if (findings.length) {
+        addLine(`发现 ${findings.length} 个问题`, 'warning')
+        findings.forEach((f) => {
+          const risk = (f.risk_level || f.risk || 'info').toUpperCase()
+          addLine(`  [${risk}] ${f.type || f.detail || JSON.stringify(f)}`, f.risk_level === 'critical' ? 'error' : 'warning')
         })
       } else if (data.total_findings) {
-        addLine(`[+] Found ${data.total_findings} issue(s)`, 'warning')
-        if (data.findings) {
-          data.findings.forEach((f) => {
-            const riskTag = (f.risk_level || f.risk || 'info').toUpperCase()
-            addLine(`  [${riskTag}] ${f.type || f.detail || JSON.stringify(f).substring(0, 120)}`, f.risk_level === 'critical' ? 'error' : 'warning')
-          })
+        addLine(`发现 ${data.total_findings} 个问题`, 'warning')
+      } else if (data.is_honeypot !== undefined) {
+        if (data.is_honeypot) {
+          addLine(`检测到蜜罐: ${data.honeypot_type} (${data.confidence}%)`, 'error')
+        } else {
+          addLine('未检测到蜜罐', 'success')
+        }
+      } else if (data.waf_detected !== undefined) {
+        if (data.waf_detected) {
+          addLine(`检测到 WAF: ${data.waf_name} (${data.confidence}%)`, 'warning')
+        } else {
+          addLine('未检测到 WAF', 'success')
         }
       } else {
-        addLine(`[INFO] No vulnerabilities found`, 'info')
+        addLine('未发现漏洞', 'info')
       }
 
-      if (data.stats) {
-        addLine(`[STATS] Requests: ${data.stats.requests_sent || 'N/A'} | Duration: ${data.stats.duration || 'N/A'}s`, 'info')
-      }
-
-      setResults(data)
     } catch (e) {
-      addLine(`[ERROR] ${e.response?.data?.detail || e.message}`, 'error')
+      addLine(`ERROR: ${e.response?.data?.detail || e.message}`, 'error')
     } finally {
       setLoading(false)
       addLine('$ _', 'prompt')
@@ -127,14 +127,7 @@ export default function Attack() {
 
   return (
     <div>
-      <div className="pixel-text" style={{
-        fontSize: '14px',
-        color: 'var(--text-bright)',
-        textShadow: '0 0 10px var(--accent-glow)',
-        marginBottom: '24px',
-      }}>
-        // ATTACK ENGINES
-      </div>
+      <div className="sec-title" style={{ marginBottom: '24px' }}>攻击引擎</div>
 
       <div style={{
         display: 'grid',
@@ -145,24 +138,24 @@ export default function Attack() {
         {ENGINES.map((engine) => (
           <div
             key={engine.id}
-            className="pixel-card"
-            onClick={() => { setActiveEngine(engine.id); setFormData({}); setResults(null); setTerminalLines([]) }}
+            className="card"
+            onClick={() => { setActiveEngine(engine.id); setFormData({}); setTerminalLines([]) }}
             style={{
               padding: '16px',
               cursor: 'pointer',
-              borderColor: activeEngine === engine.id ? 'var(--border-glow)' : 'var(--border-color)',
-              boxShadow: activeEngine === engine.id ? '0 0 20px var(--shadow-color)' : '0 0 10px var(--shadow-color)',
+              borderColor: activeEngine === engine.id ? 'var(--accent)' : 'var(--border-color)',
+              background: activeEngine === engine.id ? 'var(--accent-subtle)' : 'var(--bg-card)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-              <span className="mono-text" style={{ color: 'var(--accent)', fontSize: '16px', marginRight: '8px' }}>
-                {engine.icon}
+              <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-title)', fontSize: '16px', marginRight: '10px' }}>
+                [{engine.icon}]
               </span>
-              <span className="pixel-text-sm" style={{ color: 'var(--text-bright)' }}>
+              <span style={{ color: 'var(--text-bright)', fontWeight: 600, fontSize: '14px' }}>
                 {engine.name}
               </span>
             </div>
-            <div className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '11px', lineHeight: '1.5' }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.5' }}>
               {engine.desc}
             </div>
           </div>
@@ -170,14 +163,14 @@ export default function Attack() {
       </div>
 
       {activeEngine && (
-        <div className="pixel-card" style={{ padding: '20px', marginBottom: '24px' }}>
-          <div className="pixel-text-sm" style={{ color: 'var(--text-bright)', marginBottom: '16px' }}>
-            [ {ENGINES.find((e) => e.id === activeEngine)?.name} CONFIG ]
+        <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
+          <div style={{ color: 'var(--text-bright)', fontWeight: 600, fontSize: '14px', marginBottom: '16px' }}>
+            {ENGINES.find((e) => e.id === activeEngine)?.name} 配置
           </div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             {ENGINES.find((e) => e.id === activeEngine)?.params.map((param) => (
               <div key={param.name} style={{ flex: '1', minWidth: '200px' }}>
-                <div className="pixel-text-sm" style={{ color: 'var(--text-dim)', marginBottom: '6px' }}>
+                <div className="label-text" style={{ marginBottom: '6px', fontSize: '11px' }}>
                   {param.label}
                 </div>
                 {param.type === 'select' ? (
@@ -202,22 +195,22 @@ export default function Attack() {
               </div>
             ))}
             <button
-              className="pixel-btn pixel-btn-accent"
+              className="btn btn-accent"
               onClick={handleRun}
               disabled={loading}
               style={{ minWidth: '120px' }}
             >
-              {loading ? 'RUNNING...' : '[ EXECUTE ]'}
+              {loading ? '执行中...' : '执行'}
             </button>
           </div>
         </div>
       )}
 
       {terminalLines.length > 0 && (
-        <div className="pixel-terminal" style={{ maxHeight: '500px', minHeight: '200px' }}>
+        <div className="terminal" style={{ maxHeight: '500px', minHeight: '200px' }}>
           {terminalLines.map((line, i) => (
             <div key={i} className={`line ${line.type}`}>
-              <span className="mono-text" style={{ color: 'var(--text-dim)', marginRight: '8px', fontSize: '10px' }}>
+              <span style={{ color: 'var(--text-dim)', marginRight: '8px', fontSize: '11px' }}>
                 [{line.time}]
               </span>
               {line.text}
@@ -227,9 +220,9 @@ export default function Attack() {
       )}
 
       {!activeEngine && !terminalLines.length && (
-        <div className="pixel-terminal" style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="mono-text" style={{ color: 'var(--text-dim)' }}>
-            $ select an attack engine above to begin...
+        <div className="terminal" style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: '14px' }}>
+            选择上方攻击引擎开始...
           </div>
         </div>
       )}

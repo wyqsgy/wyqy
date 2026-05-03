@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
 WyqYan CLI - Primary Entry Point
-DDDD2-inspired three-layer architecture: Recon -> Fingerprint -> Attack
+Three-layer architecture: Recon -> Fingerprint -> Attack
 All functionality available via CLI. Frontend is optional visual layer.
 
 Usage:
     wyqyan scan -t http://target.com          # Full scan pipeline
     wyqyan scan -t http://target.com -m quick # Quick scan
     wyqyan scan -t http://target.com -m stealth # Stealth mode
-    wyqyan recon -t http://target.com         # Recon only (ports + subdomains + fingerprint)
+    wyqyan scan -t http://target.com -m full  # Full intensive scan
+    wyqyan scan -t http://target.com --modules spring,shiro,log4j2  # Specific modules
+    wyqyan scan -t http://target.com --tamper space2comment,randomcase  # WAF bypass
+    wyqyan scan -t http://target.com --resume task-123  # Resume scan
+    wyqyan recon -t http://target.com         # Recon only
     wyqyan finger -t http://target.com        # Fingerprint only
     wyqyan attack waf -t http://target.com    # WAF detection + bypass
     wyqyan attack jwt --token eyJ...          # JWT analysis
@@ -56,7 +60,7 @@ BANNER = r"""
 ║  {bold}  \ V  V /  __/ |_| |_| | |_| |/ / (_| | | | | (_| | |   {reset}{cyan} ║
 ║  {bold}   \_/\_/ \___|\__|\___/ \__, /___\__,_|_| |_|\__,_|_|   {reset}{cyan} ║
 ║  {bold}                        |___/                              {reset}{cyan} ║
-║  {dim}DDDD2 Blueprint | CLI-First | Pixel UI Ready{reset}{cyan}              ║
+║  {dim}Three-Layer Architecture | CLI-First | Web UI Ready{reset}{cyan}     ║
 ╚══════════════════════════════════════════════════════════════╝{reset}
 """.format(**COLORS)
 
@@ -77,6 +81,30 @@ def risk_tag(level):
 
 def print_banner():
     sys.stdout.write(BANNER)
+
+
+def progress_bar(current, total, prefix="", suffix="", length=30):
+    if total == 0:
+        return
+    pct = current / total
+    filled = int(length * pct)
+    bar = f"{COLORS['cyan']}{'█' * filled}{COLORS['dim']}{'░' * (length - filled)}{COLORS['reset']}"
+    pct_str = f"{int(pct * 100)}%"
+    sys.stdout.write(f"\r  {prefix} {bar} {pct_str} {suffix}")
+    sys.stdout.flush()
+    if current >= total:
+        sys.stdout.write("\n")
+
+
+def ask_yes_no(question, default=True):
+    default_str = "Y/n" if default else "y/N"
+    try:
+        answer = input(f"\n  {COLORS['yellow']}[?]{COLORS['reset']} {question} [{default_str}]: ").strip().lower()
+        if not answer:
+            return default
+        return answer in ("y", "yes")
+    except (KeyboardInterrupt, EOFError):
+        return False
 
 
 def find_process(port):
@@ -115,11 +143,15 @@ def cmd_scan(args):
     mode = args.mode
     modules = args.modules.split(",") if args.modules else None
     output = args.output
+    tamper = args.tamper.split(",") if args.tamper else None
+    verbose = args.verbose
 
     cprint(f"\n  Target : {target}", "cyan", bold=True)
     cprint(f"  Mode   : {mode}", "cyan")
     if modules:
         cprint(f"  Modules: {', '.join(modules)}", "cyan")
+    if tamper:
+        cprint(f"  Tamper : {', '.join(tamper)}", "cyan")
 
     cprint(f"\n  {'='*50}", "dim")
 
@@ -136,10 +168,25 @@ def cmd_scan(args):
     cprint(f"  {status_icon(True)} Language  : {', '.join(languages) if languages else 'unknown'}", "green")
     cprint(f"  {status_icon(True)} Middleware: {', '.join(middlewares) if middlewares else 'unknown'}", "green")
 
+    if verbose:
+        for key, label in [("server", "Server"), ("cdn", "CDN"), ("waf", "WAF")]:
+            items = fp.get(key, [])
+            if isinstance(items, list) and items:
+                names = [f"{i.get('name','')} {i.get('version','')}".strip() for i in items]
+                cprint(f"  {status_icon(True)} {label:12}: {', '.join(names)}", "dim")
+        if fp.get("security_headers"):
+            for k, v in fp["security_headers"].items():
+                icon = status_icon(v.get("present", False))
+                cprint(f"  {icon} {v.get('name', k)}", "dim")
+
     cprint(f"\n  [2/4] Defense Detection", "yellow", bold=True)
     waf = detect_waf(target)
     if waf.get("waf_detected"):
         cprint(f"  {status_icon(False)} WAF       : {waf['waf_name']} (confidence: {waf['confidence']}%)", "red")
+        if tamper:
+            cprint(f"  {status_icon(True)} Tamper    : {len(tamper)} bypass scripts loaded", "green")
+        elif mode != "stealth":
+            cprint(f"  {status_icon(True)} Tip       : use --tamper to enable WAF bypass", "dim")
     else:
         cprint(f"  {status_icon(True)} WAF       : not detected", "green")
 
@@ -147,8 +194,10 @@ def cmd_scan(args):
     if hp.get("is_honeypot"):
         cprint(f"  {status_icon(False)} Honeypot  : {hp['honeypot_type']} (confidence: {hp['confidence']}%)", "red")
         cprint(f"  {status_icon(False)} WARNING   : {hp.get('risk_warning', 'Target may be a trap!')}", "red")
-        if args.mode != "stealth":
-            return
+        if mode != "stealth":
+            if not ask_yes_no("Target appears to be a honeypot. Continue anyway?", default=False):
+                cprint(f"\n  Scan aborted by user.", "yellow")
+                return
     else:
         cprint(f"  {status_icon(True)} Honeypot  : not detected", "green")
 
@@ -167,7 +216,14 @@ def cmd_scan(args):
     scan_modules = modules if modules else matched
     cprint(f"  {status_icon(True)} Task ID   : {task_id}", "green")
     cprint(f"  {status_icon(True)} Modules   : {len(scan_modules)}", "green")
-    start_scan(task_id, target, scan_modules)
+
+    if mode == "full" and not modules:
+        if not ask_yes_no(f"Full scan will run {len(scan_modules)} modules. Continue?", default=True):
+            cprint(f"\n  Scan aborted by user.", "yellow")
+            return
+
+    cprint(f"\n  Scanning", "cyan", bold=True)
+    start_scan(task_id, target, scan_modules, fingerprint=fp)
 
     cprint(f"\n  {'='*50}", "dim")
     cprint(f"  Scan complete. Task ID: {task_id}", "green", bold=True)
@@ -455,19 +511,24 @@ def main():
         print_banner()
 
     parser = argparse.ArgumentParser(
-        description="WyqYan - DDDD2 Blueprint CLI-First Vulnerability Scanner",
+        description="WyqYan - CLI-First Vulnerability Scanner",
         usage="wyqyan <command> [<args>]"
     )
     parser.add_argument("--no-banner", action="store_true", help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     p_scan = subparsers.add_parser("scan", help="Full scan pipeline (recon + finger + attack)")
-    p_scan.add_argument("-t", "--target", required=True)
-    p_scan.add_argument("-m", "--mode", default="quick", choices=["quick", "full", "stealth"])
-    p_scan.add_argument("--modules")
-    p_scan.add_argument("-o", "--output")
+    p_scan.add_argument("-t", "--target", required=True, help="Target URL or IP")
+    p_scan.add_argument("-m", "--mode", default="quick",
+                        choices=["quick", "full", "stealth"],
+                        help="Scan mode: quick (fast), full (intensive), stealth (evasive)")
+    p_scan.add_argument("--modules", help="Comma-separated module/category names")
+    p_scan.add_argument("--tamper", help="Comma-separated tamper script names for WAF bypass")
+    p_scan.add_argument("-o", "--output", help="Output file path")
+    p_scan.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    p_scan.add_argument("--resume", help="Resume a previous scan by task ID")
 
-    p_recon = subparsers.add_parser("recon", help="Reconnaissance only")
+    p_recon = subparsers.add_parser("recon", help="Reconnaissance only (ports + subdomains + fingerprint)")
     p_recon.add_argument("-t", "--target", required=True)
     p_recon.add_argument("-o", "--output")
 
@@ -477,33 +538,33 @@ def main():
 
     p_attack = subparsers.add_parser("attack", help="Attack engine modules")
     a_sub = p_attack.add_subparsers(dest="module")
-    a_waf = a_sub.add_parser("waf", help="WAF detection + bypass")
+    a_waf = a_sub.add_parser("waf", help="WAF detection + bypass testing")
     a_waf.add_argument("-t", "--target", required=True)
     a_jwt = a_sub.add_parser("jwt", help="JWT analysis + attack")
     a_jwt.add_argument("--token", required=True)
     a_ssrf = a_sub.add_parser("ssrf", help="SSRF detection + chain exploit")
     a_ssrf.add_argument("-t", "--target", required=True)
-    a_des = a_sub.add_parser("deserial", help="Deserialization scan")
+    a_des = a_sub.add_parser("deserial", help="Deserialization vulnerability scan")
     a_des.add_argument("-t", "--target", required=True)
-    a_fuzz = a_sub.add_parser("fuzz", help="Smart fuzzing")
+    a_fuzz = a_sub.add_parser("fuzz", help="Smart parameter fuzzing")
     a_fuzz.add_argument("-t", "--target", required=True)
-    a_hp = a_sub.add_parser("honeypot", help="Honeypot detection")
+    a_hp = a_sub.add_parser("honeypot", help="Honeypot/trap detection")
     a_hp.add_argument("-t", "--target", required=True)
 
     subparsers.add_parser("privesc", help="Linux privilege escalation scan")
 
     p_web = subparsers.add_parser("web", help="Start frontend (optional visual layer)")
-    p_web.add_argument("--port", type=int)
-    p_web.add_argument("--force", action="store_true")
-    p_web.add_argument("--no-open", action="store_true")
+    p_web.add_argument("--port", type=int, help="Frontend port (default: 3000)")
+    p_web.add_argument("--force", action="store_true", help="Force kill existing process on port")
+    p_web.add_argument("--no-open", action="store_true", help="Don't open browser")
 
     p_server = subparsers.add_parser("server", help="Start API server only")
-    p_server.add_argument("--port", type=int)
-    p_server.add_argument("--no-reload", action="store_true")
-    p_server.add_argument("--force", action="store_true")
+    p_server.add_argument("--port", type=int, help="Server port (default: 8000)")
+    p_server.add_argument("--no-reload", action="store_true", help="Disable auto-reload")
+    p_server.add_argument("--force", action="store_true", help="Force kill existing process on port")
 
-    subparsers.add_parser("stop", help="Stop all services")
-    subparsers.add_parser("status", help="Show service status")
+    subparsers.add_parser("stop", help="Stop all running services")
+    subparsers.add_parser("status", help="Show running service status")
 
     args = parser.parse_args()
 
@@ -537,7 +598,7 @@ def main():
         elif args.command == "status":
             cmd_status(args)
     except KeyboardInterrupt:
-        cprint(f"\n  Interrupted by user", "yellow")
+        cprint(f"\n\n  Scan interrupted by user. Use --resume to continue later.", "yellow")
         sys.exit(0)
     except Exception as e:
         cprint(f"\n  {status_icon(False)} Error: {e}", "red")

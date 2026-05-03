@@ -1,16 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.task import ScanTask, TaskStatus
 from app.models.vulnerability import Vulnerability
 from app.models.report import Report
-from app.ai.report_generator import AIReportGenerator
+from app.ai.report_generator import generate_html_report, save_report, generate_report_id
 from app.utils.helper import gen_report_id
 from app.config import RISK_LEVELS
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
-report_gen = AIReportGenerator()
 
 
 @router.post("/generate/{task_id}")
@@ -27,13 +26,20 @@ def generate_report(task_id: str, db: Session = Depends(get_db)):
             "vuln_id": v.vuln_id,
             "name": v.name,
             "category": v.category,
+            "module": v.module,
             "risk_level": v.risk_level,
+            "risk_score": v.risk_score,
             "target_url": v.target_url,
+            "description": v.description,
             "detail": v.detail,
+            "payload": v.payload,
+            "fix_suggestion": v.fix_suggestion,
+            "cve_ids": v.cve_ids or [],
+            "references": v.references or [],
             "ai_confidence": v.ai_confidence,
+            "evidence": v.evidence,
         })
 
-    summary = report_gen.generate_summary(vuln_list)
     risk_distribution = {}
     for v in vulns:
         level = v.risk_level
@@ -45,23 +51,24 @@ def generate_report(task_id: str, db: Session = Depends(get_db)):
         "finished_at": str(task.finished_at),
     }
 
-    ai_analyses = []
-    for v in vulns:
-        analysis = report_gen.generate_analysis(
-            vuln_name=v.name,
-            vuln_detail=v.detail or v.description,
-            evidence=v.evidence or "",
-            risk_level=v.risk_level,
-            payload=v.payload or "",
-            category=v.category,
-        )
-        ai_analyses.append({"vuln_id": v.vuln_id, "analysis": analysis})
+    summary = f"本次安全评估针对 {task.target} 进行，共发现 {len(vulns)} 个安全漏洞。"
+    if risk_distribution.get("critical"):
+        summary += f" 其中严重漏洞 {risk_distribution['critical']} 个，需立即修复。"
+    if risk_distribution.get("high"):
+        summary += f" 高危漏洞 {risk_distribution['high']} 个，需紧急处理。"
 
-    html_content = report_gen.generate_html_report(task_info, vuln_list, summary)
+    fingerprint = task.fingerprint or None
 
-    report_id = gen_report_id()
+    result = save_report(
+        task_id=task_id,
+        task_info=task_info,
+        vulnerabilities=vuln_list,
+        fingerprint=fingerprint,
+        summary=summary,
+    )
+
     report = Report(
-        report_id=report_id,
+        report_id=result["report_id"],
         task_id=task_id,
         title=f"WyqYan安全扫描报告 - {task.target}",
         summary=summary,
@@ -69,11 +76,10 @@ def generate_report(task_id: str, db: Session = Depends(get_db)):
         risk_distribution=risk_distribution,
         target_info=task_info,
         ai_summary=summary,
-        content_html=html_content,
+        content_html="",
         content_json={
             "task_info": task_info,
             "vulnerabilities": vuln_list,
-            "ai_analyses": ai_analyses,
             "summary": summary,
             "risk_distribution": risk_distribution,
         },
@@ -83,8 +89,12 @@ def generate_report(task_id: str, db: Session = Depends(get_db)):
 
     return {
         "code": 200,
-        "message": "Report generated",
-        "data": {"report_id": report_id, "total_vulns": len(vulns)},
+        "message": "报告生成成功",
+        "data": {
+            "report_id": result["report_id"],
+            "total_vulns": len(vulns),
+            "risk_distribution": risk_distribution,
+        },
     }
 
 
@@ -95,6 +105,7 @@ def list_reports(task_id: str, db: Session = Depends(get_db)):
         "report_id": r.report_id,
         "title": r.title,
         "total_vulns": r.total_vulns,
+        "risk_distribution": r.risk_distribution,
         "created_at": str(r.created_at),
     } for r in reports]
 
@@ -105,7 +116,7 @@ def list_reports(task_id: str, db: Session = Depends(get_db)):
 def get_report(report_id: str, db: Session = Depends(get_db)):
     report = db.query(Report).filter(Report.report_id == report_id).first()
     if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail="报告未找到")
 
     return {
         "code": 200,
@@ -126,6 +137,97 @@ def get_report(report_id: str, db: Session = Depends(get_db)):
 def get_report_html(report_id: str, db: Session = Depends(get_db)):
     report = db.query(Report).filter(Report.report_id == report_id).first()
     if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail="报告未找到")
 
-    return HTMLResponse(content=report.content_html)
+    vulns = db.query(Vulnerability).filter(Vulnerability.task_id == report.task_id).all()
+    vuln_list = []
+    for v in vulns:
+        vuln_list.append({
+            "vuln_id": v.vuln_id,
+            "name": v.name,
+            "category": v.category,
+            "module": v.module,
+            "risk_level": v.risk_level,
+            "risk_score": v.risk_score,
+            "target_url": v.target_url,
+            "description": v.description,
+            "detail": v.detail,
+            "payload": v.payload,
+            "fix_suggestion": v.fix_suggestion,
+            "cve_ids": v.cve_ids or [],
+            "references": v.references or [],
+            "evidence": v.evidence,
+        })
+
+    task_info = {
+        "target": report.target_info.get("target", "N/A") if report.target_info else "N/A",
+        "created_at": report.target_info.get("created_at", "N/A") if report.target_info else "N/A",
+        "finished_at": report.target_info.get("finished_at", "N/A") if report.target_info else "N/A",
+    }
+
+    html = generate_html_report(
+        task_info=task_info,
+        vulnerabilities=vuln_list,
+        summary=report.summary or "",
+        report_id=report.report_id,
+    )
+
+    return HTMLResponse(content=html)
+
+
+@router.get("/{report_id}/json")
+def get_report_json(report_id: str, db: Session = Depends(get_db)):
+    report = db.query(Report).filter(Report.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="报告未找到")
+
+    return JSONResponse(content={
+        "code": 200,
+        "data": report.content_json or {},
+    })
+
+
+@router.get("/{report_id}/download")
+def download_report(report_id: str, db: Session = Depends(get_db)):
+    report = db.query(Report).filter(Report.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="报告未找到")
+
+    vulns = db.query(Vulnerability).filter(Vulnerability.task_id == report.task_id).all()
+    vuln_list = []
+    for v in vulns:
+        vuln_list.append({
+            "vuln_id": v.vuln_id,
+            "name": v.name,
+            "risk_level": v.risk_level,
+            "risk_score": v.risk_score,
+            "target_url": v.target_url,
+            "description": v.description,
+            "detail": v.detail,
+            "payload": v.payload,
+            "fix_suggestion": v.fix_suggestion,
+            "cve_ids": v.cve_ids or [],
+            "references": v.references or [],
+        })
+
+    task_info = {
+        "target": report.target_info.get("target", "N/A") if report.target_info else "N/A",
+        "created_at": report.target_info.get("created_at", "N/A") if report.target_info else "N/A",
+        "finished_at": report.target_info.get("finished_at", "N/A") if report.target_info else "N/A",
+    }
+
+    html = generate_html_report(
+        task_info=task_info,
+        vulnerabilities=vuln_list,
+        summary=report.summary or "",
+        report_id=report.report_id,
+    )
+
+    from fastapi.responses import Response
+    return Response(
+        content=html,
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f"attachment; filename=WyqYan_Report_{report.report_id}.html"
+        },
+    )
