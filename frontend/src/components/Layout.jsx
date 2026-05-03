@@ -10,6 +10,9 @@ const navItems = [
   { to: '/reports', icon: '#', label: '扫描报告' },
   { to: '/recon', icon: '@', label: '信息收集' },
   { to: '/attack', icon: '*', label: '攻击引擎' },
+  { to: '/pocs', icon: '$', label: 'POC管理' },
+  { to: '/verify', icon: '?', label: 'AI验证' },
+  { to: '/settings', icon: '%', label: '系统设置' },
 ]
 
 const THEME_KEY = 'wyqyan-theme'

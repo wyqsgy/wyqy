@@ -9,6 +9,9 @@ import Vulnerabilities from './pages/Vulnerabilities'
 import Reports from './pages/Reports'
 import Recon from './pages/Recon'
 import Attack from './pages/Attack'
+import POCManagement from './pages/POCManagement'
+import PacketVerifier from './pages/PacketVerifier'
+import Settings from './pages/Settings'
 
 export default function App() {
   return (
@@ -22,6 +25,9 @@ export default function App() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/recon" element={<Recon />} />
         <Route path="/attack" element={<Attack />} />
+        <Route path="/pocs" element={<POCManagement />} />
+        <Route path="/verify" element={<PacketVerifier />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   )

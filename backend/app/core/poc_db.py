@@ -139,7 +139,14 @@ def get_all_pocs() -> List[POC]:
     return list(POC_DATABASE.values())
 
 
-def _init_poc_database():
+def _init_poc_database()
+
+try:
+    from app.core.poc_db_extra import _init_extra_pocs
+    _init_extra_pocs()
+    logger.info("Extra POC signatures loaded successfully")
+except Exception as e:
+    logger.warning(f"Failed to load extra POC signatures: {e}"):
     pocs = [
 
         POC(
@@ -1384,3 +1391,10 @@ def _init_poc_database():
 
 
 _init_poc_database()
+
+try:
+    from app.core.poc_db_extra import _init_extra_pocs
+    _init_extra_pocs()
+    logger.info("Extra POC signatures loaded successfully")
+except Exception as e:
+    logger.warning(f"Failed to load extra POC signatures: {e}")

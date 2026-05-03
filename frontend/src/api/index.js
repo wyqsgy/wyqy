@@ -40,4 +40,24 @@ export const fingerprintTarget = (data) => api.post('/recon/fingerprint', data)
 export const enumerateSubdomains = (data) => api.post('/recon/subdomain', data)
 export const quickEnumSubdomains = (domain) => api.get(`/recon/subdomain/quick?domain=${domain}`)
 
+export const getPOCs = (params) => api.get('/pocs', { params })
+export const getPOCStats = () => api.get('/pocs/stats')
+export const createPOC = (data) => api.post('/pocs/custom', data)
+export const updatePOC = (id, data) => api.put(`/pocs/custom/${id}`, data)
+export const deletePOC = (id) => api.delete(`/pocs/custom/${id}`)
+export const togglePOC = (id) => api.post(`/pocs/custom/${id}/toggle`)
+
+export const verifyPacket = (data) => api.post('/verify/packet', data)
+export const verifyBatchPackets = (data) => api.post('/verify/batch', data)
+export const verifyRawPacket = (data) => api.post('/verify/raw', data)
+
+export const getAIModels = () => api.get('/settings/ai-models')
+export const createAIModel = (data) => api.post('/settings/ai-models', data)
+export const updateAIModel = (id, data) => api.put(`/settings/ai-models/${id}`, data)
+export const deleteAIModel = (id) => api.delete(`/settings/ai-models/${id}`)
+export const testAIModel = (id) => api.post(`/settings/ai-models/${id}/test`)
+export const getInfoKeys = () => api.get('/settings/info-keys')
+export const saveInfoKey = (data) => api.post('/settings/info-keys', data)
+export const deleteInfoKey = (id) => api.delete(`/settings/info-keys/${id}`)
+
 export default api
