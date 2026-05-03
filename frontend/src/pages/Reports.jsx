@@ -1,83 +1,96 @@
 import React, { useState, useEffect } from 'react'
-import { getTasks, listReports, generateReport, getReportHtml } from '../api'
+import { listReports } from '../api'
 
 export default function Reports() {
-  const [tasks, setTasks] = useState([])
   const [reports, setReports] = useState([])
-  const [selectedTask, setSelectedTask] = useState('')
-  const [generating, setGenerating] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-  useEffect(() => { loadTasks() }, [])
+  useEffect(() => { loadReports() }, [])
 
-  useEffect(() => { if (selectedTask) loadReports(selectedTask) }, [selectedTask])
-
-  const loadTasks = async () => {
+  const loadReports = async () => {
+    setLoading(true)
     try {
-      const res = await getTasks({ limit: 50, status: 'completed' })
-      setTasks(res.data.data.items || [])
-    } catch (e) { console.error(e) }
-  }
-
-  const loadReports = async (taskId) => {
-    try {
-      const res = await listReports(taskId)
-      setReports(res.data.data.items || [])
-    } catch (e) { console.error(e) }
-  }
-
-  const handleGenerate = async () => {
-    if (!selectedTask) return
-    setGenerating(true)
-    try {
-      await generateReport(selectedTask)
-      loadReports(selectedTask)
-    } catch (e) { alert('生成失败') }
-    finally { setGenerating(false) }
-  }
-
-  const handleViewHtml = async (reportId) => {
-    try {
-      const res = await getReportHtml(reportId)
-      const win = window.open('', '_blank')
-      win.document.write(res.data)
-      win.document.close()
-    } catch (e) { alert('获取报告失败') }
+      const res = await listReports()
+      setReports(res.data.data?.items || res.data.data || [])
+    } catch (e) {
+      console.error('Reports load error:', e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-dark-900 mb-6">报告中心</h1>
-
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6">
-        <div className="flex items-end gap-4">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-dark-700 mb-2">选择任务</label>
-            <select value={selectedTask} onChange={(e) => setSelectedTask(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-              <option value="">请选择已完成的扫描任务</option>
-              {tasks.map(t => <option key={t.task_id} value={t.task_id}>{t.target} ({t.vuln_count}个漏洞)</option>)}
-            </select>
-          </div>
-          <button onClick={handleGenerate} disabled={!selectedTask || generating}
-            className="px-6 py-2 bg-primary-700 text-white rounded-lg text-sm hover:bg-primary-800 disabled:opacity-50">
-            {generating ? '生成中...' : '📄 生成报告'}
-          </button>
-        </div>
+      <div className="pixel-text" style={{
+        fontSize: '14px',
+        color: 'var(--text-bright)',
+        textShadow: '0 0 10px var(--accent-glow)',
+        marginBottom: '24px',
+      }}>
+        // REPORTS
       </div>
 
-      <div className="space-y-3">
-        {reports.map((r) => (
-          <div key={r.report_id} className="bg-white rounded-lg p-4 border border-gray-100 flex items-center justify-between">
-            <div>
-              <div className="font-medium text-dark-800">{r.title}</div>
-              <div className="text-xs text-dark-400 mt-1">共 {r.total_vulns} 个漏洞 | {r.created_at?.slice(0, 19)}</div>
-            </div>
-            <button onClick={() => handleViewHtml(r.report_id)} className="px-4 py-2 bg-primary-100 text-primary-700 rounded-lg text-sm hover:bg-primary-200">
-              查看报告
-            </button>
-          </div>
-        ))}
-        {reports.length === 0 && <div className="bg-white rounded-lg p-12 text-center text-dark-400 border border-gray-100">暂无报告</div>}
+      <div className="pixel-card" style={{ padding: '0', overflow: 'hidden' }}>
+        <div className="pixel-table">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>TITLE</th>
+                <th>TARGET</th>
+                <th>VULNS</th>
+                <th>FORMAT</th>
+                <th>CREATED</th>
+                <th>ACTION</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
+                    <span className="mono-text" style={{ color: 'var(--text-dim)' }}>LOADING...</span>
+                  </td>
+                </tr>
+              ) : reports.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '40px' }}>
+                    <span className="mono-text" style={{ color: 'var(--text-dim)' }}>NO REPORTS</span>
+                  </td>
+                </tr>
+              ) : (
+                reports.map((r) => (
+                  <tr key={r.id || r.report_id}>
+                    <td className="mono-text" style={{ color: 'var(--accent)', fontSize: '12px' }}>
+                      {r.id?.substring(0, 8) || r.report_id?.substring(0, 8) || 'N/A'}
+                    </td>
+                    <td className="pixel-text-sm" style={{ color: 'var(--text-primary)' }}>
+                      {r.title || 'REPORT'}
+                    </td>
+                    <td className="mono-text" style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
+                      {r.target?.substring(0, 40) || 'N/A'}
+                    </td>
+                    <td className="mono-text" style={{ color: 'var(--danger)', fontSize: '13px' }}>
+                      {r.vuln_count || 0}
+                    </td>
+                    <td>
+                      <span className="pixel-badge" style={{ borderColor: 'var(--info)', color: 'var(--info)' }}>
+                        {r.format || 'JSON'}
+                      </span>
+                    </td>
+                    <td className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '10px' }}>
+                      {r.created_at ? new Date(r.created_at).toLocaleDateString() : 'N/A'}
+                    </td>
+                    <td>
+                      <button className="pixel-btn" style={{ fontSize: '7px', padding: '4px 8px' }}>
+                        [DL]
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )

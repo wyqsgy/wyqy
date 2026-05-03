@@ -1,172 +1,238 @@
 import React, { useState } from 'react'
-import { detectWAF, bypassWAF, detectHoneypot, smartFuzz, analyzeJWT } from '../api'
+import { detectWAF, scanDeserialization, scanSSRF, analyzeJWT, smartFuzz, detectHoneypot, scanPrivesc } from '../api'
 
-const TOOLS = [
-  { key: 'waf', label: 'WAF检测与绕过', icon: '🛡️', desc: '识别WAF类型并测试绕过技术' },
-  { key: 'honeypot', label: '蜜罐识别', icon: '🍯', desc: '检测目标是否为蜜罐诱捕系统' },
-  { key: 'fuzz', label: '智能模糊测试', icon: '💉', desc: 'SQL注入/XSS/SSTI/命令注入等自动化Fuzz' },
-  { key: 'jwt', label: 'JWT攻击套件', icon: '🔑', desc: '算法混淆/密钥爆破/kid注入/Claims篡改' },
+const ENGINES = [
+  {
+    id: 'waf',
+    name: 'WAF BYPASS',
+    icon: '[*]',
+    desc: 'WAF detection with 20+ signatures and 25+ evasion techniques',
+    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+  },
+  {
+    id: 'deserial',
+    name: 'DESERIALIZATION',
+    icon: '[!]',
+    desc: 'Java/PHP/Python/.NET deserialization chain detection with 24+ gadget chains',
+    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+  },
+  {
+    id: 'ssrf',
+    name: 'SSRF CHAIN',
+    icon: '[@]',
+    desc: 'Multi-layer SSRF detection with cloud metadata exploitation and protocol chains',
+    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+  },
+  {
+    id: 'jwt',
+    name: 'JWT ATTACK',
+    icon: '[#]',
+    desc: 'Algorithm confusion, key brute-force, header injection, and claim tampering',
+    params: [{ name: 'token', label: 'JWT TOKEN', placeholder: 'eyJhbGciOi...' }],
+  },
+  {
+    id: 'fuzz',
+    name: 'SMART FUZZ',
+    icon: '[~]',
+    desc: 'Response diff analysis + WAF adaptive mutation + parameter auto-discovery',
+    params: [
+      { name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' },
+      { name: 'mode', label: 'MODE', type: 'select', options: ['deep', 'quick'] },
+    ],
+  },
+  {
+    id: 'honeypot',
+    name: 'HONEYPOT DETECT',
+    icon: '[?]',
+    desc: '30+ honeypot signatures with active deception and latency anomaly detection',
+    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+  },
+  {
+    id: 'privesc',
+    name: 'LINUX PRIVESC',
+    icon: '[>]',
+    desc: 'LinPEAS-style detection with 280+ GTFOBins and 20+ kernel exploit matching',
+    params: [],
+  },
 ]
 
 export default function Attack() {
-  const [tool, setTool] = useState('waf')
-  const [target, setTarget] = useState('')
-  const [jwtToken, setJwtToken] = useState('')
+  const [activeEngine, setActiveEngine] = useState(null)
+  const [formData, setFormData] = useState({})
+  const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
+  const [terminalLines, setTerminalLines] = useState([])
+
+  const addLine = (text, type = 'output') => {
+    setTerminalLines((prev) => [...prev, { text, type, time: new Date().toLocaleTimeString() }])
+  }
 
   const handleRun = async () => {
-    if (tool !== 'jwt' && !target.trim()) return
-    if (tool === 'jwt' && !jwtToken.trim()) return
+    if (!activeEngine) return
     setLoading(true)
-    setError('')
-    setResult(null)
+    setResults(null)
+    setTerminalLines([])
+
+    const engine = ENGINES.find((e) => e.id === activeEngine)
+    addLine(`$ wyqyan attack ${activeEngine} ${Object.entries(formData).map(([k, v]) => `--${k} ${v}`).join(' ')}`, 'prompt')
+    addLine(`[INFO] Starting ${engine.name} engine...`, 'info')
+
     try {
-      let res
-      if (tool === 'waf') {
-        res = await detectWAF({ target_url: target })
-      } else if (tool === 'honeypot') {
-        res = await detectHoneypot({ target_url: target })
-      } else if (tool === 'fuzz') {
-        res = await smartFuzz({ target_url: target })
-      } else if (tool === 'jwt') {
-        res = await analyzeJWT({ token: jwtToken })
+      const apiMap = {
+        waf: () => detectWAF({ target: formData.target }),
+        deserial: () => scanDeserialization({ target: formData.target }),
+        ssrf: () => scanSSRF({ target: formData.target }),
+        jwt: () => analyzeJWT({ token: formData.token }),
+        fuzz: () => smartFuzz({ target: formData.target, mode: formData.mode || 'deep' }),
+        honeypot: () => detectHoneypot({ target: formData.target }),
+        privesc: () => scanPrivesc(),
       }
-      setResult(res?.data?.data)
+      const apiFn = apiMap[activeEngine]
+      if (!apiFn) throw new Error('Unknown engine')
+      const res = await apiFn()
+      const data = res.data?.data || res.data || {}
+
+      addLine(`[OK] ${engine.name} completed`, 'success')
+
+      if (data.findings?.length) {
+        addLine(`[+] Found ${data.findings.length} issue(s)`, 'warning')
+        data.findings.forEach((f) => {
+          const riskTag = (f.risk_level || f.risk || 'info').toUpperCase()
+          addLine(`  [${riskTag}] ${f.type || f.detail || JSON.stringify(f)}`, f.risk_level === 'critical' ? 'error' : 'warning')
+        })
+      } else if (data.total_findings) {
+        addLine(`[+] Found ${data.total_findings} issue(s)`, 'warning')
+        if (data.findings) {
+          data.findings.forEach((f) => {
+            const riskTag = (f.risk_level || f.risk || 'info').toUpperCase()
+            addLine(`  [${riskTag}] ${f.type || f.detail || JSON.stringify(f).substring(0, 120)}`, f.risk_level === 'critical' ? 'error' : 'warning')
+          })
+        }
+      } else {
+        addLine(`[INFO] No vulnerabilities found`, 'info')
+      }
+
+      if (data.stats) {
+        addLine(`[STATS] Requests: ${data.stats.requests_sent || 'N/A'} | Duration: ${data.stats.duration || 'N/A'}s`, 'info')
+      }
+
+      setResults(data)
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || '操作失败')
+      addLine(`[ERROR] ${e.response?.data?.detail || e.message}`, 'error')
     } finally {
       setLoading(false)
+      addLine('$ _', 'prompt')
     }
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-800">⚔️ 攻击引擎</h1>
+    <div>
+      <div className="pixel-text" style={{
+        fontSize: '14px',
+        color: 'var(--text-bright)',
+        textShadow: '0 0 10px var(--accent-glow)',
+        marginBottom: '24px',
+      }}>
+        // ATTACK ENGINES
+      </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {TOOLS.map(t => (
-          <button key={t.key} onClick={() => { setTool(t.key); setResult(null); setError(''); }}
-            className={`p-4 rounded-lg text-left transition-all border ${
-              tool === t.key ? 'border-primary-500 bg-primary-50 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'
-            }`}>
-            <div className="text-2xl mb-1">{t.icon}</div>
-            <div className="font-medium text-sm">{t.label}</div>
-            <div className="text-xs text-gray-500 mt-1">{t.desc}</div>
-          </button>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: '12px',
+        marginBottom: '24px',
+      }}>
+        {ENGINES.map((engine) => (
+          <div
+            key={engine.id}
+            className="pixel-card"
+            onClick={() => { setActiveEngine(engine.id); setFormData({}); setResults(null); setTerminalLines([]) }}
+            style={{
+              padding: '16px',
+              cursor: 'pointer',
+              borderColor: activeEngine === engine.id ? 'var(--border-glow)' : 'var(--border-color)',
+              boxShadow: activeEngine === engine.id ? '0 0 20px var(--shadow-color)' : '0 0 10px var(--shadow-color)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+              <span className="mono-text" style={{ color: 'var(--accent)', fontSize: '16px', marginRight: '8px' }}>
+                {engine.icon}
+              </span>
+              <span className="pixel-text-sm" style={{ color: 'var(--text-bright)' }}>
+                {engine.name}
+              </span>
+            </div>
+            <div className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '11px', lineHeight: '1.5' }}>
+              {engine.desc}
+            </div>
+          </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6 space-y-4">
-        {tool === 'jwt' ? (
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-700">JWT Token</label>
-            <textarea value={jwtToken} onChange={e => setJwtToken(e.target.value)}
-              placeholder="eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.xxx"
-              className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
-              rows={3} />
+      {activeEngine && (
+        <div className="pixel-card" style={{ padding: '20px', marginBottom: '24px' }}>
+          <div className="pixel-text-sm" style={{ color: 'var(--text-bright)', marginBottom: '16px' }}>
+            [ {ENGINES.find((e) => e.id === activeEngine)?.name} CONFIG ]
           </div>
-        ) : (
-          <input type="text" value={target} onChange={e => setTarget(e.target.value)}
-            placeholder="输入目标URL (http://...)"
-            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-            onKeyDown={e => e.key === 'Enter' && handleRun()} />
-        )}
-        <button onClick={handleRun} disabled={loading}
-          className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
-          {loading ? '执行中...' : '开始执行'}
-        </button>
-
-        {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}
-
-        {result && tool === 'waf' && (
-          <div className="space-y-3">
-            <div className={`p-4 rounded-lg ${result.waf_detected ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
-              <div className="font-semibold">
-                {result.waf_detected ? `⚠️ WAF检测到: ${result.waf_name} (置信度: ${result.confidence}%)` : '✅ 未检测到WAF'}
-              </div>
-              {result.details && <div className="text-sm mt-1 text-gray-600">{result.details}</div>}
-            </div>
-          </div>
-        )}
-
-        {result && tool === 'honeypot' && (
-          <div className={`p-4 rounded-lg ${result.is_honeypot ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
-            <div className="font-semibold">
-              {result.is_honeypot ? `🍯 蜜罐警告: ${result.honeypot_type} (置信度: ${result.confidence}%)` : '✅ 未检测到蜜罐'}
-            </div>
-            {result.risk_warning && <div className="text-sm mt-1 text-gray-600">{result.risk_warning}</div>}
-            {result.indicators?.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {result.indicators.map((ind, i) => (
-                  <div key={i} className="text-xs text-gray-500">• {ind.detail} (评分: {ind.score})</div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {result && tool === 'fuzz' && (
-          <div>
-            <p className="text-sm text-gray-500 mb-3">发现 {result.total_findings} 个问题</p>
-            <div className="space-y-2">
-              {result.findings?.map((f, i) => (
-                <div key={i} className={`p-3 rounded-lg border text-sm ${
-                  f.risk_level === 'critical' ? 'bg-red-50 border-red-200' :
-                  f.risk_level === 'high' ? 'bg-orange-50 border-orange-200' :
-                  'bg-yellow-50 border-yellow-200'
-                }`}>
-                  <div className="font-semibold">[{f.risk_level?.toUpperCase()}] {f.type}</div>
-                  <div className="text-gray-600">{f.detail}</div>
-                  {f.payload && <div className="font-mono text-xs mt-1 text-gray-500 break-all">Payload: {f.payload}</div>}
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            {ENGINES.find((e) => e.id === activeEngine)?.params.map((param) => (
+              <div key={param.name} style={{ flex: '1', minWidth: '200px' }}>
+                <div className="pixel-text-sm" style={{ color: 'var(--text-dim)', marginBottom: '6px' }}>
+                  {param.label}
                 </div>
-              ))}
-              {result.total_findings === 0 && <div className="text-green-600">✅ 未发现明显漏洞</div>}
-            </div>
+                {param.type === 'select' ? (
+                  <select
+                    className="pixel-select"
+                    value={formData[param.name] || param.options[0]}
+                    onChange={(e) => setFormData({ ...formData, [param.name]: e.target.value })}
+                    style={{ width: '100%' }}
+                  >
+                    {param.options.map((o) => (
+                      <option key={o} value={o}>{o.toUpperCase()}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="pixel-input"
+                    placeholder={param.placeholder}
+                    value={formData[param.name] || ''}
+                    onChange={(e) => setFormData({ ...formData, [param.name]: e.target.value })}
+                  />
+                )}
+              </div>
+            ))}
+            <button
+              className="pixel-btn pixel-btn-accent"
+              onClick={handleRun}
+              disabled={loading}
+              style={{ minWidth: '120px' }}
+            >
+              {loading ? 'RUNNING...' : '[ EXECUTE ]'}
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {result && tool === 'jwt' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-gray-500 mb-1">Header</h4>
-                <pre className="text-xs font-mono">{JSON.stringify(result.header, null, 2)}</pre>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <h4 className="text-xs font-semibold text-gray-500 mb-1">Payload</h4>
-                <pre className="text-xs font-mono">{JSON.stringify(result.payload, null, 2)}</pre>
-              </div>
+      {terminalLines.length > 0 && (
+        <div className="pixel-terminal" style={{ maxHeight: '500px', minHeight: '200px' }}>
+          {terminalLines.map((line, i) => (
+            <div key={i} className={`line ${line.type}`}>
+              <span className="mono-text" style={{ color: 'var(--text-dim)', marginRight: '8px', fontSize: '10px' }}>
+                [{line.time}]
+              </span>
+              {line.text}
             </div>
-            <div>
-              <span className="text-sm font-medium">算法: </span>
-              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{result.algorithm}</span>
-            </div>
-            {result.vulnerabilities?.length > 0 && (
-              <div>
-                <h4 className="font-semibold text-sm mb-2">发现的漏洞</h4>
-                {result.vulnerabilities.map((v, i) => (
-                  <div key={i} className="p-2 bg-red-50 rounded mb-1 text-sm">
-                    <span className="font-semibold">[{v.risk}]</span> {v.type}: {v.detail}
-                  </div>
-                ))}
-              </div>
-            )}
-            {result.attack_results?.length > 0 && (
-              <div>
-                <h4 className="font-semibold text-sm mb-2">攻击测试结果</h4>
-                {result.attack_results.map((a, i) => (
-                  <div key={i} className="p-2 bg-gray-50 rounded mb-1 text-xs font-mono">
-                    <span className="font-semibold text-red-600">{a.attack}</span>: {a.result || a.risk || ''}
-                    {a.forged_token && <div className="break-all mt-1 text-gray-500">Token: {a.forged_token}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
+          ))}
+        </div>
+      )}
+
+      {!activeEngine && !terminalLines.length && (
+        <div className="pixel-terminal" style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="mono-text" style={{ color: 'var(--text-dim)' }}>
+            $ select an attack engine above to begin...
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

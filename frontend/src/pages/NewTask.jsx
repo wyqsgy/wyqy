@@ -1,55 +1,34 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createTask, getCategories } from '../api'
+import { createTask } from '../api'
 
-const CATEGORY_LABELS = {
-  spring: { name: 'Spring Framework', icon: '🍃', vulns: 'Spring4Shell / SpEL / Actuator / Gateway / Function' },
-  shiro: { name: 'Apache Shiro', icon: '🔐', vulns: '反序列化 / 权限绕过' },
-  log4j2: { name: 'Log4j2', icon: '📝', vulns: 'JNDI注入 (Log4Shell)' },
-  fastjson: { name: 'Fastjson', icon: '⚡', vulns: '反序列化RCE' },
-  nacos: { name: 'Nacos', icon: '🌐', vulns: '认证绕过 / Derby RCE / 配置泄露' },
-  druid: { name: 'Druid', icon: '🐉', vulns: '监控面板未授权访问' },
-  tomcat: { name: 'Tomcat', icon: '🐱', vulns: 'Manager未授权 / 弱口令' },
-  struts2: { name: 'Struts2', icon: '🚀', vulns: 'OGNL注入系列' },
-  thinkphp: { name: 'ThinkPHP', icon: '🐘', vulns: '5.x/6.x RCE系列' },
-  weblogic: { name: 'Oracle WebLogic', icon: '☕', vulns: '反序列化 / SSRF / 未授权RCE' },
-  redis: { name: 'Redis', icon: '🔴', vulns: '未授权访问 / CONFIG命令执行' },
-  confluence: { name: 'Confluence', icon: '📘', vulns: 'OGNL注入RCE (CVE-2022-26134)' },
-  f5: { name: 'F5 BIG-IP', icon: '🛡️', vulns: 'iControl REST RCE / TMUI' },
-  jenkins: { name: 'Jenkins', icon: '🏗️', vulns: 'Script Console / 未授权访问 / API泄露' },
-  flink: { name: 'Apache Flink', icon: '🌊', vulns: 'Dashboard未授权 / 任意Jar上传RCE' },
-  xxljob: { name: 'XXL-JOB', icon: '⏰', vulns: '执行器API未授权RCE' },
-  nginx: { name: 'Nginx', icon: '🌐', vulns: '路径穿越 / CRLF注入 / 信息泄露' },
-  elasticsearch: { name: 'Elasticsearch', icon: '🔍', vulns: '未授权访问 / 索引数据泄露' },
-}
+const SCAN_TYPES = [
+  { id: 'full', name: 'FULL SCAN', desc: 'Recon + Fingerprint + Attack (all modules)', icon: '[*]' },
+  { id: 'recon', name: 'RECON ONLY', desc: 'Subdomain + Port + Fingerprint', icon: '[@]' },
+  { id: 'attack', name: 'ATTACK ONLY', desc: 'WAF + Deserial + SSRF + JWT + Fuzz + Honeypot', icon: '[!]' },
+  { id: 'quick', name: 'QUICK SCAN', desc: 'Fast fingerprint + top POCs only', icon: '[>]' },
+]
 
 export default function NewTask() {
   const navigate = useNavigate()
   const [target, setTarget] = useState('')
-  const [selected, setSelected] = useState(new Set(['all']))
+  const [scanType, setScanType] = useState('full')
   const [loading, setLoading] = useState(false)
-
-  const toggleCategory = (cat) => {
-    const next = new Set(selected)
-    if (cat === 'all') {
-      setSelected(new Set(['all']))
-      return
-    }
-    next.delete('all')
-    next.has(cat) ? next.delete(cat) : next.add(cat)
-    if (next.size === 0) next.add('all')
-    setSelected(next)
-  }
+  const [error, setError] = useState('')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!target.trim()) return
+    if (!target.trim()) {
+      setError('TARGET IS REQUIRED')
+      return
+    }
     setLoading(true)
+    setError('')
     try {
-      const res = await createTask({ target: target.trim(), categories: Array.from(selected) })
-      navigate(`/tasks/${res.data.data.task_id}`)
-    } catch (err) {
-      alert('创建任务失败: ' + (err.response?.data?.detail || err.message))
+      await createTask({ target: target.trim(), scan_type: scanType })
+      navigate('/tasks')
+    } catch (e) {
+      setError(e.response?.data?.detail || 'CREATE FAILED')
     } finally {
       setLoading(false)
     }
@@ -57,57 +36,88 @@ export default function NewTask() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-dark-900 mb-6">新建扫描任务</h1>
+      <div className="pixel-text" style={{
+        fontSize: '14px',
+        color: 'var(--text-bright)',
+        textShadow: '0 0 10px var(--accent-glow)',
+        marginBottom: '24px',
+      }}>
+        // NEW SCAN
+      </div>
 
-      <form onSubmit={handleSubmit} className="max-w-3xl">
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6">
-          <label className="block text-sm font-medium text-dark-700 mb-2">扫描目标</label>
-          <input
-            type="text"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder="输入目标URL，例如: http://192.168.1.100:8080"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-          />
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 mb-6">
-          <label className="block text-sm font-medium text-dark-700 mb-4">选择扫描模块</label>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => toggleCategory('all')}
-              className={`p-4 rounded-lg border-2 text-left transition-all ${
-                selected.has('all') ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              <div className="font-medium">🎯 全部模块</div>
-              <div className="text-xs text-dark-400 mt-1">检测所有支持的漏洞类型</div>
-            </button>
-            {Object.entries(CATEGORY_LABELS).map(([key, cat]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => toggleCategory(key)}
-                className={`p-4 rounded-lg border-2 text-left transition-all ${
-                  selected.has(key) ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="font-medium">{cat.icon} {cat.name}</div>
-                <div className="text-xs text-dark-400 mt-1">{cat.vulns}</div>
-              </button>
-            ))}
+      <div className="pixel-card" style={{ padding: '24px', maxWidth: '700px' }}>
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '20px' }}>
+            <div className="pixel-text-sm" style={{ color: 'var(--text-dim)', marginBottom: '8px' }}>
+              TARGET
+            </div>
+            <input
+              className="pixel-input"
+              placeholder="https://target.com or 192.168.1.1"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              autoFocus
+            />
           </div>
-        </div>
 
-        <button
-          type="submit"
-          disabled={loading || !target.trim()}
-          className="w-full py-3 bg-primary-700 text-white rounded-lg font-medium hover:bg-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-        >
-          {loading ? '提交中...' : '🚀 开始扫描'}
-        </button>
-      </form>
+          <div style={{ marginBottom: '20px' }}>
+            <div className="pixel-text-sm" style={{ color: 'var(--text-dim)', marginBottom: '12px' }}>
+              SCAN TYPE
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+              gap: '8px',
+            }}>
+              {SCAN_TYPES.map((st) => (
+                <div
+                  key={st.id}
+                  onClick={() => setScanType(st.id)}
+                  style={{
+                    padding: '12px',
+                    background: scanType === st.id ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                    border: scanType === st.id ? '2px solid var(--border-glow)' : '2px solid var(--border-color)',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    boxShadow: scanType === st.id ? '0 0 10px var(--shadow-color)' : 'none',
+                  }}
+                >
+                  <div className="mono-text" style={{ color: 'var(--accent)', fontSize: '14px', marginBottom: '4px' }}>
+                    {st.icon}
+                  </div>
+                  <div className="pixel-text-sm" style={{ color: 'var(--text-primary)' }}>
+                    {st.name}
+                  </div>
+                  <div className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '9px', marginTop: '4px' }}>
+                    {st.desc}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {error && (
+            <div className="pixel-text-sm" style={{
+              color: 'var(--danger)',
+              marginBottom: '16px',
+              padding: '8px',
+              border: '1px solid var(--danger)',
+              background: 'rgba(255,51,51,0.1)',
+            }}>
+              [ERROR] {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="pixel-btn pixel-btn-accent"
+            disabled={loading}
+            style={{ width: '100%' }}
+          >
+            {loading ? 'CREATING...' : '[ START SCAN ]'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

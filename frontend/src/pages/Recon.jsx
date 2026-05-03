@@ -1,175 +1,207 @@
 import React, { useState } from 'react'
-import { fingerprintTarget, quickPortScan, enumerateSubdomains } from '../api'
+import { enumerateSubdomains, scanPorts, fingerprintTarget } from '../api'
 
-const TABS = [
-  { key: 'fingerprint', label: '资产指纹', icon: '🔍' },
-  { key: 'ports', label: '端口扫描', icon: '🔌' },
-  { key: 'subdomain', label: '子域名枚举', icon: '🌐' },
+const RECON_MODULES = [
+  {
+    id: 'subdomain',
+    name: 'SUBDOMAIN',
+    icon: '[@]',
+    desc: 'Multi-source subdomain enumeration with 150+ DNS servers and brute-force',
+    params: [{ name: 'domain', label: 'DOMAIN', placeholder: 'example.com' }],
+  },
+  {
+    id: 'port',
+    name: 'PORT SCAN',
+    icon: '[#]',
+    desc: 'Multi-threaded port scanning with service detection for 90+ common ports',
+    params: [{ name: 'target', label: 'TARGET', placeholder: '192.168.1.1' }],
+  },
+  {
+    id: 'fingerprint',
+    name: 'FINGERPRINT',
+    icon: '[~]',
+    desc: 'Web technology fingerprinting with 27+ categories and version detection',
+    params: [{ name: 'target', label: 'TARGET URL', placeholder: 'https://target.com' }],
+  },
 ]
 
 export default function Recon() {
-  const [tab, setTab] = useState('fingerprint')
-  const [target, setTarget] = useState('')
+  const [activeModule, setActiveModule] = useState(null)
+  const [formData, setFormData] = useState({})
+  const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
+  const [terminalLines, setTerminalLines] = useState([])
 
-  const handleScan = async () => {
-    if (!target.trim()) return
+  const addLine = (text, type = 'output') => {
+    setTerminalLines((prev) => [...prev, { text, type, time: new Date().toLocaleTimeString() }])
+  }
+
+  const handleRun = async () => {
+    if (!activeModule) return
     setLoading(true)
-    setError('')
-    setResult(null)
+    setResults(null)
+    setTerminalLines([])
+
+    const mod = RECON_MODULES.find((m) => m.id === activeModule)
+    addLine(`$ wyqyan recon ${activeModule} ${Object.entries(formData).map(([k, v]) => `--${k} ${v}`).join(' ')}`, 'prompt')
+    addLine(`[INFO] Starting ${mod.name} reconnaissance...`, 'info')
+
     try {
-      let res
-      if (tab === 'fingerprint') {
-        res = await fingerprintTarget({ target_url: target })
-      } else if (tab === 'ports') {
-        res = await quickPortScan(target)
-      } else if (tab === 'subdomain') {
-        res = await enumerateSubdomains({ domain: target })
+      const apiMap = {
+        subdomain: () => enumerateSubdomains({ domain: formData.domain }),
+        port: () => scanPorts({ target: formData.target }),
+        fingerprint: () => fingerprintTarget({ target: formData.target }),
       }
-      setResult(res?.data?.data)
+      const apiFn = apiMap[activeModule]
+      if (!apiFn) throw new Error('Unknown module')
+      const res = await apiFn()
+      const data = res.data?.data || res.data || {}
+
+      addLine(`[OK] ${mod.name} completed`, 'success')
+
+      if (data.subdomains?.length) {
+        addLine(`[+] Found ${data.subdomains.length} subdomains`, 'warning')
+        data.subdomains.slice(0, 20).forEach((s) => {
+          const sub = typeof s === 'string' ? s : s.subdomain || s.domain || JSON.stringify(s)
+          addLine(`  ${sub}`, 'output')
+        })
+        if (data.subdomains.length > 20) {
+          addLine(`  ... and ${data.subdomains.length - 20} more`, 'info')
+        }
+      }
+
+      if (data.ports?.length) {
+        addLine(`[+] Found ${data.ports.length} open ports`, 'warning')
+        data.ports.slice(0, 20).forEach((p) => {
+          const port = typeof p === 'object' ? `${p.port}/${p.protocol || 'tcp'} - ${p.service || 'unknown'}` : p
+          addLine(`  ${port}`, 'output')
+        })
+      }
+
+      if (data.fingerprints?.length) {
+        addLine(`[+] Identified ${data.fingerprints.length} technologies`, 'warning')
+        data.fingerprints.slice(0, 15).forEach((f) => {
+          const fp = typeof f === 'string' ? f : `${f.name || f.tech} ${f.version || ''}`
+          addLine(`  ${fp}`, 'output')
+        })
+      }
+
+      if (data.technologies?.length) {
+        addLine(`[+] Identified ${data.technologies.length} technologies`, 'warning')
+        data.technologies.slice(0, 15).forEach((t) => {
+          const tech = typeof t === 'string' ? t : `${t.name || t.tech} ${t.version || ''}`
+          addLine(`  ${tech}`, 'output')
+        })
+      }
+
+      if (!data.subdomains?.length && !data.ports?.length && !data.fingerprints?.length && !data.technologies?.length) {
+        addLine(`[INFO] No results returned`, 'info')
+      }
+
+      setResults(data)
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || '扫描失败')
+      addLine(`[ERROR] ${e.response?.data?.detail || e.message}`, 'error')
     } finally {
       setLoading(false)
+      addLine('$ _', 'prompt')
     }
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-800">🔭 信息收集</h1>
-      <div className="flex space-x-2 border-b pb-2">
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => { setTab(t.key); setResult(null); setError(''); }}
-            className={`px-4 py-2 rounded-t-lg text-sm font-medium transition-all ${
-              tab === t.key ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}>
-            {t.icon} {t.label}
-          </button>
+    <div>
+      <div className="pixel-text" style={{
+        fontSize: '14px',
+        color: 'var(--text-bright)',
+        textShadow: '0 0 10px var(--accent-glow)',
+        marginBottom: '24px',
+      }}>
+        // RECONNAISSANCE
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: '12px',
+        marginBottom: '24px',
+      }}>
+        {RECON_MODULES.map((mod) => (
+          <div
+            key={mod.id}
+            className="pixel-card"
+            onClick={() => { setActiveModule(mod.id); setFormData({}); setResults(null); setTerminalLines([]) }}
+            style={{
+              padding: '16px',
+              cursor: 'pointer',
+              borderColor: activeModule === mod.id ? 'var(--border-glow)' : 'var(--border-color)',
+              boxShadow: activeModule === mod.id ? '0 0 20px var(--shadow-color)' : '0 0 10px var(--shadow-color)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+              <span className="mono-text" style={{ color: 'var(--accent)', fontSize: '16px', marginRight: '8px' }}>
+                {mod.icon}
+              </span>
+              <span className="pixel-text-sm" style={{ color: 'var(--text-bright)' }}>
+                {mod.name}
+              </span>
+            </div>
+            <div className="mono-text" style={{ color: 'var(--text-dim)', fontSize: '11px', lineHeight: '1.5' }}>
+              {mod.desc}
+            </div>
+          </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-lg shadow p-6 space-y-4">
-        <div className="flex space-x-3">
-          <input
-            type="text" value={target} onChange={e => setTarget(e.target.value)}
-            placeholder={tab === 'ports' ? '输入IP或域名' : tab === 'subdomain' ? '输入域名 (example.com)' : '输入目标URL (http://...)'}
-            className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-            onKeyDown={e => e.key === 'Enter' && handleScan()}
-          />
-          <button onClick={handleScan} disabled={loading || !target.trim()}
-            className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50">
-            {loading ? '扫描中...' : '开始扫描'}
-          </button>
+      {activeModule && (
+        <div className="pixel-card" style={{ padding: '20px', marginBottom: '24px' }}>
+          <div className="pixel-text-sm" style={{ color: 'var(--text-bright)', marginBottom: '16px' }}>
+            [ {RECON_MODULES.find((m) => m.id === activeModule)?.name} CONFIG ]
+          </div>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            {RECON_MODULES.find((m) => m.id === activeModule)?.params.map((param) => (
+              <div key={param.name} style={{ flex: '1', minWidth: '200px' }}>
+                <div className="pixel-text-sm" style={{ color: 'var(--text-dim)', marginBottom: '6px' }}>
+                  {param.label}
+                </div>
+                <input
+                  className="pixel-input"
+                  placeholder={param.placeholder}
+                  value={formData[param.name] || ''}
+                  onChange={(e) => setFormData({ ...formData, [param.name]: e.target.value })}
+                />
+              </div>
+            ))}
+            <button
+              className="pixel-btn pixel-btn-accent"
+              onClick={handleRun}
+              disabled={loading}
+              style={{ minWidth: '120px' }}
+            >
+              {loading ? 'SCANNING...' : '[ EXECUTE ]'}
+            </button>
+          </div>
         </div>
+      )}
 
-        {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}
+      {terminalLines.length > 0 && (
+        <div className="pixel-terminal" style={{ maxHeight: '500px', minHeight: '200px' }}>
+          {terminalLines.map((line, i) => (
+            <div key={i} className={`line ${line.type}`}>
+              <span className="mono-text" style={{ color: 'var(--text-dim)', marginRight: '8px', fontSize: '10px' }}>
+                [{line.time}]
+              </span>
+              {line.text}
+            </div>
+          ))}
+        </div>
+      )}
 
-        {result && tab === 'fingerprint' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <InfoCard title="Web框架" items={result.framework?.map(f => f.name)} color="blue" />
-              <InfoCard title="开发语言" items={result.language?.map(l => l.name)} color="green" />
-              <InfoCard title="中间件" items={result.middleware?.map(m => m.name)} color="purple" />
-              <InfoCard title="操作系统" items={result.os ? [result.os] : []} color="orange" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <InfoCard title="CDN" items={result.cdn?.map(c => c.name)} color="cyan" />
-              <InfoCard title="WAF" items={result.waf?.map(w => w.name)} color="red" />
-            </div>
-            {result.security_headers && (
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="font-semibold mb-2">安全头检测</h3>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  {Object.entries(result.security_headers).map(([k, v]) => (
-                    <div key={k} className="flex items-center space-x-2">
-                      <span className={v.present ? 'text-green-600' : 'text-red-500'}>
-                        {v.present ? '✅' : '❌'}
-                      </span>
-                      <span>{v.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {result.technologies?.length > 0 && (
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="font-semibold mb-2">前端技术</h3>
-                <div className="flex flex-wrap gap-2">
-                  {result.technologies.map((t, i) => (
-                    <span key={i} className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
-                      {t.name}{t.version ? ` v${t.version}` : ''}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
+      {!activeModule && !terminalLines.length && (
+        <div className="pixel-terminal" style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="mono-text" style={{ color: 'var(--text-dim)' }}>
+            $ select a recon module above to begin...
           </div>
-        )}
-
-        {result && tab === 'ports' && (
-          <div>
-            <p className="mb-2 text-sm text-gray-500">发现 {result.open_ports} 个开放端口</p>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left">端口</th>
-                    <th className="px-4 py-2 text-left">服务</th>
-                    <th className="px-4 py-2 text-left">Banner</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.ports?.map((p, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="px-4 py-2 font-mono">{p.port}</td>
-                      <td className="px-4 py-2">{p.service}{p.is_web ? ' 🌐' : ''}</td>
-                      <td className="px-4 py-2 font-mono text-xs text-gray-500 max-w-md truncate">{p.banner || '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {result && tab === 'subdomain' && (
-          <div>
-            <p className="mb-2 text-sm text-gray-500">
-              发现 {result.total_found} 个子域名, {result.unique_ips} 个独立IP (耗时 {result.elapsed_seconds}s)
-            </p>
-            <div className="space-y-1">
-              {result.subdomains?.map((s, i) => (
-                <div key={i} className="flex items-center space-x-3 text-sm py-1 border-b border-gray-100">
-                  <span className="font-mono text-blue-700 w-64">{s.subdomain}</span>
-                  <span className="text-gray-500 font-mono">{s.ip}</span>
-                  {s.is_cdn && <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded">CDN</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function InfoCard({ title, items, color }) {
-  const colorMap = {
-    blue: 'bg-blue-50 border-blue-200 text-blue-700',
-    green: 'bg-green-50 border-green-200 text-green-700',
-    purple: 'bg-purple-50 border-purple-200 text-purple-700',
-    orange: 'bg-orange-50 border-orange-200 text-orange-700',
-    red: 'bg-red-50 border-red-200 text-red-700',
-    cyan: 'bg-cyan-50 border-cyan-200 text-cyan-700',
-  }
-  return (
-    <div className={`rounded-lg border p-3 ${colorMap[color] || 'bg-gray-50 border-gray-200'}`}>
-      <div className="text-xs font-semibold opacity-70 mb-1">{title}</div>
-      <div className="text-sm font-medium">
-        {items?.length > 0 ? items.join(', ') : '-'}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
