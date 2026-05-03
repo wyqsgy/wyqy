@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { getVulnerabilities } from '../api'
+import api from '../api'
 
 const RISK_COLORS = {
   critical: 'var(--danger)',
@@ -21,18 +21,68 @@ export default function Vulnerabilities() {
   const [vulns, setVulns] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
+  const [verifyingIds, setVerifyingIds] = useState({})
+  const [verifyResults, setVerifyResults] = useState({})
+  const [expandedId, setExpandedId] = useState(null)
 
   useEffect(() => { loadVulns() }, [])
 
   const loadVulns = async () => {
     try {
-      const res = await getVulnerabilities({ limit: 200 })
-      setVulns(res.data.data?.items || [])
+      const res = await api.get('/vulnerabilities', { params: { limit: 200 } })
+      const items = res.data.data?.items || []
+      setVulns(items)
+
+      const results = {}
+      items.forEach(v => {
+        if (v.ai_analysis) {
+          try {
+            const parsed = typeof v.ai_analysis === 'string' ? JSON.parse(v.ai_analysis) : v.ai_analysis
+            results[v.vuln_id] = {
+              is_vulnerable: parsed.is_vulnerable ?? (v.ai_confidence >= 70),
+              vulnerability_type: parsed.vulnerability_type || '',
+              confidence: parsed.confidence !== undefined ? Math.round(parsed.confidence * 100) : v.ai_confidence,
+              risk_level: parsed.risk_level || v.risk_level,
+              evidence_summary: parsed.evidence_summary || '',
+              matched_patterns: parsed.matched_patterns || [],
+              cve_ids: parsed.cve_ids || [],
+              cvss_score: parsed.cvss_score || 0,
+              remediation: parsed.remediation || '',
+              is_confirmed: v.is_confirmed,
+            }
+          } catch (e) {
+            results[v.vuln_id] = {
+              is_vulnerable: v.ai_confidence >= 70,
+              confidence: v.ai_confidence,
+              is_confirmed: v.is_confirmed,
+            }
+          }
+        }
+      })
+      setVerifyResults(results)
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleAiVerify = async (vulnId) => {
+    setVerifyingIds(prev => ({ ...prev, [vulnId]: true }))
+    try {
+      const res = await api.post(`/vulnerabilities/${vulnId}/ai-verify`)
+      const data = res.data.data
+      setVerifyResults(prev => ({
+        ...prev,
+        [vulnId]: data,
+      }))
+      setVulns(prev => prev.map(v =>
+        v.vuln_id === vulnId ? { ...v, ai_confidence: data.confidence, is_confirmed: data.is_confirmed } : v
+      ))
+    } catch (e) {
+      alert('AI验证失败: ' + (e.response?.data?.detail || e.message))
+    }
+    setVerifyingIds(prev => ({ ...prev, [vulnId]: false }))
   }
 
   const filtered = filter === 'all' ? vulns : vulns.filter((v) => v.risk_level === filter)
@@ -50,25 +100,76 @@ export default function Vulnerabilities() {
     { id: 'low', label: `低危 (${riskCounts.low || 0})` },
   ]
 
+  const cardStyle = {
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '8px',
+    padding: '16px',
+    marginBottom: '12px',
+  }
+
+  const btnStyle = {
+    padding: '5px 12px',
+    background: 'var(--accent-subtle)',
+    color: 'var(--accent)',
+    border: '1px solid var(--accent)',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
+    transition: 'all 0.15s',
+  }
+
+  const btnVerifiedStyle = {
+    ...btnStyle,
+    background: 'var(--success-subtle)',
+    color: 'var(--success)',
+    border: '1px solid var(--success)',
+  }
+
+  const btnDangerStyle = {
+    ...btnStyle,
+    background: 'var(--danger-subtle)',
+    color: 'var(--danger)',
+    border: '1px solid var(--danger)',
+  }
+
   if (loading) {
     return (
-      <div className="terminal" style={{ height: '300px' }}>
-        <div className="line prompt">$ 正在加载漏洞列表...</div>
-        <div className="line cursor">_</div>
+      <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-dim)' }}>
+        正在加载漏洞列表...
       </div>
     )
   }
 
   return (
     <div>
-      <div className="sec-title" style={{ marginBottom: '16px' }}>漏洞列表</div>
+      <div style={{ marginBottom: '20px' }}>
+        <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-bright)', margin: 0 }}>
+          漏洞列表
+        </h2>
+        <p style={{ fontSize: '13px', color: 'var(--text-dim)', marginTop: '4px' }}>
+          点击 AI验证 按钮对漏洞进行智能分析确认
+        </p>
+      </div>
 
-      <div className="pixel-tabs" style={{ marginBottom: '16px' }}>
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {filterTabs.map((tab) => (
           <button
             key={tab.id}
-            className={`pixel-tab ${filter === tab.id ? 'active' : ''}`}
             onClick={() => setFilter(tab.id)}
+            style={{
+              padding: '6px 14px',
+              background: filter === tab.id ? 'var(--sidebar-active)' : 'transparent',
+              color: filter === tab.id ? 'var(--text-bright)' : 'var(--text-dim)',
+              border: `1px solid ${filter === tab.id ? 'var(--accent)' : 'var(--border-color)'}`,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: filter === tab.id ? 600 : 400,
+              transition: 'all 0.15s',
+            }}
           >
             {tab.label}
           </button>
@@ -76,48 +177,183 @@ export default function Vulnerabilities() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="terminal" style={{ textAlign: 'center', padding: '60px 20px' }}>
-          <div style={{ color: 'var(--text-dim)', fontSize: '14px' }}>
-            {vulns.length === 0 ? '暂无漏洞' : '当前筛选条件下无漏洞'}
-          </div>
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-dim)', fontSize: '14px' }}>
+          {vulns.length === 0 ? '暂无漏洞' : '当前筛选条件下无漏洞'}
         </div>
       ) : (
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <table className="pixel-table">
-            <thead>
-              <tr>
-                <th>风险等级</th>
-                <th>检测模块</th>
-                <th>漏洞标题</th>
-                <th>目标</th>
-                <th>描述</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((v, i) => (
-                <tr key={v.id || i}>
-                  <td data-label="风险等级">
-                    <span className="badge" style={{
-                      background: `${RISK_COLORS[v.risk_level] || 'var(--text-dim)'}20`,
-                      color: RISK_COLORS[v.risk_level] || 'var(--text-dim)',
-                    }}>
-                      {RISK_LABELS[v.risk_level] || '信息'}
-                    </span>
-                  </td>
-                  <td data-label="检测模块" style={{ fontSize: '12px', color: 'var(--accent)' }}>{v.module || '-'}</td>
-                  <td data-label="漏洞标题" style={{ fontWeight: 600, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {v.title || v.type || '-'}
-                  </td>
-                  <td data-label="目标" style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
-                    {v.target || '-'}
-                  </td>
-                  <td data-label="描述" style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
-                    {v.description || v.detail || '-'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div>
+          {filtered.map((v) => {
+            const vr = verifyResults[v.vuln_id]
+            const isVerifying = verifyingIds[v.vuln_id]
+            const isExpanded = expandedId === v.vuln_id
+
+            return (
+              <div key={v.vuln_id || v.id} style={cardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        background: `${RISK_COLORS[v.risk_level]}20`,
+                        color: RISK_COLORS[v.risk_level],
+                      }}>
+                        {RISK_LABELS[v.risk_level] || '信息'}
+                      </span>
+                      <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}>
+                        {v.module || '-'}
+                      </span>
+                      {vr?.is_confirmed === 1 && (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: 'var(--success-subtle)',
+                          color: 'var(--success)',
+                        }}>
+                          ✓ AI已确认
+                        </span>
+                      )}
+                      {vr?.is_confirmed === 0 && vr?.confidence !== undefined && (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: 'var(--warning-subtle)',
+                          color: 'var(--warning)',
+                        }}>
+                          疑似误报
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-bright)', marginBottom: '4px' }}>
+                      {v.name || v.title || v.type || '-'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-dim)', lineHeight: '1.5' }}>
+                      {v.description || v.detail || '-'}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                      目标: {v.target_url || v.target || '-'}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+                    {vr ? (
+                      <button
+                        style={vr.is_vulnerable ? btnDangerStyle : btnVerifiedStyle}
+                        onClick={() => setExpandedId(isExpanded ? null : v.vuln_id)}
+                      >
+                        {vr.is_vulnerable ? `⚠ AI确认 ${vr.confidence}%` : `✓ 可信 ${vr.confidence}%`}
+                      </button>
+                    ) : (
+                      <button
+                        style={btnStyle}
+                        onClick={() => handleAiVerify(v.vuln_id)}
+                        disabled={isVerifying}
+                      >
+                        {isVerifying ? '🤖 分析中...' : '🤖 AI验证'}
+                      </button>
+                    )}
+                    {vr && (
+                      <button
+                        style={{
+                          padding: '3px 8px',
+                          background: 'transparent',
+                          color: 'var(--text-dim)',
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                        }}
+                        onClick={() => setExpandedId(isExpanded ? null : v.vuln_id)}
+                      >
+                        {isExpanded ? '收起详情 ▲' : '展开详情 ▼'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {isExpanded && vr && (
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '12px',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                  }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                      <div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>漏洞类型</div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-bright)' }}>{vr.vulnerability_type || '-'}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>AI置信度</div>
+                        <div style={{
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: vr.confidence >= 80 ? 'var(--danger)' : vr.confidence >= 50 ? 'var(--warning)' : 'var(--success)',
+                        }}>
+                          {vr.confidence}%
+                        </div>
+                      </div>
+                      {vr.cvss_score > 0 && (
+                        <div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>CVSS评分</div>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: RISK_COLORS[vr.risk_level] }}>{vr.cvss_score}</div>
+                        </div>
+                      )}
+                      {vr.cve_ids?.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>关联CVE</div>
+                          <div style={{ fontSize: '12px', color: 'var(--info)' }}>{vr.cve_ids.join(', ')}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ marginBottom: '8px' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>证据摘要</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{vr.evidence_summary || '-'}</div>
+                    </div>
+
+                    {vr.matched_patterns?.length > 0 && (
+                      <div style={{ marginBottom: '8px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>匹配特征</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {vr.matched_patterns.map((p, i) => (
+                            <span key={i} style={{
+                              padding: '2px 8px',
+                              borderRadius: '10px',
+                              fontSize: '11px',
+                              background: 'var(--bg-card)',
+                              color: 'var(--text-secondary)',
+                              border: '1px solid var(--border-color)',
+                            }}>
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {vr.remediation && (
+                      <div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>修复建议</div>
+                        <div style={{ fontSize: '12px', color: 'var(--success)', lineHeight: '1.5', padding: '8px', background: 'var(--success-subtle)', borderRadius: '4px' }}>
+                          {vr.remediation}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
