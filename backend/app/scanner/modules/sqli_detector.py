@@ -7,9 +7,11 @@ import time
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class SQLiDetector(BaseScanner):
     name = "SQL注入漏洞"
     description = "检测目标是否存在SQL注入漏洞，支持多种数据库类型和注入技术"

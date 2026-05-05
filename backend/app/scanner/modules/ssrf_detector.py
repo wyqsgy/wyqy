@@ -5,9 +5,11 @@ Detects SSRF vulnerabilities through various protocols and bypass techniques
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class SSRFDetector(BaseScanner):
     name = "SSRF服务端请求伪造漏洞"
     description = "检测目标是否存在SSRF漏洞，攻击者可利用该漏洞访问内网资源或进行端口扫描"

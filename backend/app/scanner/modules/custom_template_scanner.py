@@ -16,6 +16,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from app.scanner.base import BaseScanner, VulnResult
+from app.scanner.loader import register_scanner
 from app.core.template_engine import (
     TemplateParser,
     TemplateMatcher,
@@ -38,6 +39,7 @@ class TemplateResponse:
     elapsed: float
 
 
+@register_scanner
 class CustomTemplateScanner(BaseScanner):
     module = "custom-templates"
     name = "自定义检测模板"

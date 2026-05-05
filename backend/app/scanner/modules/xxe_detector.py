@@ -5,9 +5,11 @@ Detects XXE injection vulnerabilities in XML parsers
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class XXEDetector(BaseScanner):
     name = "XXE外部实体注入漏洞"
     description = "检测目标是否存在XXE漏洞，攻击者可读取服务器文件、发起SSRF攻击或导致拒绝服务"

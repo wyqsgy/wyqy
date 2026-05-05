@@ -5,9 +5,11 @@ Detects missing or weak CSRF protections in web forms
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class CSRFDetector(BaseScanner):
     name = "CSRF跨站请求伪造漏洞"
     description = "检测目标是否存在CSRF漏洞，攻击者可诱导用户执行非预期的操作"

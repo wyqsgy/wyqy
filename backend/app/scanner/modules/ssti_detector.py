@@ -5,9 +5,11 @@ Detects template injection in various engines: Jinja2, Twig, Freemarker, Velocit
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class SSTIDetector(BaseScanner):
     name = "服务端模板注入漏洞"
     description = "检测目标是否存在SSTI漏洞，攻击者可注入模板表达式实现RCE或信息泄露"

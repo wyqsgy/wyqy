@@ -5,6 +5,7 @@ Enables template-driven vulnerability detection with complex matching logic.
 from typing import List, Optional
 
 from app.scanner.base import BaseScanner, VulnResult
+from app.scanner.loader import register_scanner
 from app.core.poc_db import POC, RiskLevel, get_pocs_by_tags, get_all_pocs
 from app.core.poc_executor import execute_poc, POCResponse
 from app.utils.logger import get_logger
@@ -12,6 +13,7 @@ from app.utils.logger import get_logger
 logger = get_logger("poc_scanner")
 
 
+@register_scanner
 class POCScanner(BaseScanner):
     """Generic POC-based scanner that can run any POC template."""
 
@@ -85,6 +87,7 @@ class POCScanner(BaseScanner):
         return found_any
 
 
+@register_scanner
 class TagBasedPOCScanner(BaseScanner):
     """Scanner that runs all POCs matching specific tags."""
 

@@ -616,3 +616,57 @@ async def quick_get(url: str, **kwargs) -> HTTPResponse:
 async def quick_post(url: str, **kwargs) -> HTTPResponse:
     client = await AsyncHTTPClient.get_instance()
     return await client.post(url, **kwargs)
+
+
+class SyncHTTPClient:
+    """Synchronous HTTP client wrapper for scanner modules."""
+
+    def __init__(self):
+        import requests
+        self._session = requests.Session()
+        self._session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+
+    def get(self, url: str, timeout: int = 10, **kwargs) -> "SyncHTTPResponse":
+        import requests
+        try:
+            resp = self._session.get(url, timeout=timeout, **kwargs)
+            return SyncHTTPResponse(resp.status_code, resp.headers, resp.content, resp.text, resp.elapsed.total_seconds())
+        except requests.RequestException:
+            return SyncHTTPResponse(0, {}, b"", "", 0)
+
+    def post(self, url: str, timeout: int = 10, **kwargs) -> "SyncHTTPResponse":
+        import requests
+        try:
+            resp = self._session.post(url, timeout=timeout, **kwargs)
+            return SyncHTTPResponse(resp.status_code, resp.headers, resp.content, resp.text, resp.elapsed.total_seconds())
+        except requests.RequestException:
+            return SyncHTTPResponse(0, {}, b"", "", 0)
+
+
+class SyncHTTPResponse:
+    def __init__(self, status_code: int, headers: dict, content: bytes, text: str, elapsed: float):
+        self.status_code = status_code
+        self.headers = headers
+        self.content = content
+        self.text = text
+        self.elapsed = elapsed
+
+    @property
+    def status(self):
+        return self.status_code
+
+    @property
+    def body(self):
+        return self.content
+
+
+_sync_client: Optional[SyncHTTPClient] = None
+
+
+def get_client() -> SyncHTTPClient:
+    global _sync_client
+    if _sync_client is None:
+        _sync_client = SyncHTTPClient()
+    return _sync_client

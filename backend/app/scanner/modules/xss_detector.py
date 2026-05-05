@@ -6,9 +6,11 @@ Includes WAF bypass payloads
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class XSSDetector(BaseScanner):
     name = "XSS跨站脚本漏洞"
     description = "检测目标是否存在反射型XSS跨站脚本漏洞，支持多种上下文和WAF绕过"
@@ -51,8 +53,8 @@ class XSSDetector(BaseScanner):
         '<ScRiPt>alert("XSS")</ScRiPt>',
         '<img src=x onerror="&#97;&#108;&#101;&#114;&#116;&#40;&#39;&#88;&#83;&#83;&#39;&#41;">',
         '<img src=x onerror=eval(atob("YWxlcnQoJ1hTUycp"))>',
-        '<img src=x onerror="\u0061\u006C\u0065\u0072\u0074('\u0058\u0053\u0053')">',
-        '<img src=x onerror=alert`XSS`>',
+        '<img src=x onerror="\u0061\u006C\u0065\u0072\u0074(\'\u0058\u0053\u0053\')">',
+        '<img src=x onerror=alert("XSS")>',
         '<img src=x onerror=alert(String.fromCharCode(88,83,83))>',
         '<svg><script>alert&#40"XSS"&#41</script></svg>',
         '<img src=x onerror=window["al"+"ert"]("XSS")>',

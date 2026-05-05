@@ -9,6 +9,7 @@ import time
 from typing import List, Optional, Dict
 
 from app.scanner.base import BaseScanner, VulnResult
+from app.scanner.loader import register_scanner
 from app.scanner.passive.traffic_analyzer import (
     TrafficAnalyzer, PassiveFinding, PassiveRuleSeverity,
 )
@@ -26,6 +27,7 @@ SEVERITY_MAP = {
 }
 
 
+@register_scanner
 class PassiveScanner(BaseScanner):
     name = "被动流量分析扫描器"
     description = "分析HTTP流量自动发现安全配置问题和信息泄露，无需发送额外请求"

@@ -5,9 +5,11 @@ Detects path traversal and file inclusion vulnerabilities
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class LFIDetector(BaseScanner):
     name = "文件包含漏洞"
     description = "检测目标是否存在本地/远程文件包含漏洞，攻击者可读取敏感文件或执行远程代码"

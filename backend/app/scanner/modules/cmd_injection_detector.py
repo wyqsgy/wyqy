@@ -5,9 +5,11 @@ Detects OS command injection through various injection points and techniques
 import re
 import urllib.parse
 from app.scanner.base import BaseScanner
+from app.scanner.loader import register_scanner
 from app.core.http_client import get_client
 
 
+@register_scanner
 class CommandInjectionDetector(BaseScanner):
     name = "命令注入漏洞"
     description = "检测目标是否存在OS命令注入漏洞，攻击者可执行任意系统命令"
