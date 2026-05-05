@@ -1,0 +1,25 @@
+{
+  "name": "WyqYan 漏洞扫描平台",
+  "short_name": "WyqYan",
+  "description": "专业级网络安全漏洞扫描与渗透测试平台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e1525",
+  "theme_color": "#58a6ff",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["security", "utilities", "developer tools"],
+  "lang": "zh-CN",
+  "dir": "ltr"
+}

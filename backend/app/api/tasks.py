@@ -59,7 +59,7 @@ def create_task(req: CreateTaskRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(task)
 
-    start_scan(task_id, req.target, categories)
+    start_scan(task_id, req.target, categories, scan_mode=req.scan_type)
 
     return {
         "code": 200,

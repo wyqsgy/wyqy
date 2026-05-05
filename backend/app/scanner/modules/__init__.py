@@ -12,3 +12,14 @@ from app.scanner.modules import nacos_rce
 from app.scanner.modules import druid_unauth
 from app.scanner.modules import tomcat_manager_unauth
 from app.scanner.modules import struts2_ognl
+from app.scanner.modules import sqli_detector
+from app.scanner.modules import xss_detector
+from app.scanner.modules import ssrf_detector
+from app.scanner.modules import cmd_injection_detector
+from app.scanner.modules import file_upload_detector
+from app.scanner.modules import lfi_detector
+from app.scanner.modules import ssti_detector
+from app.scanner.modules import xxe_detector
+from app.scanner.modules import csrf_detector
+from app.scanner.modules import poc_scanner
+from app.scanner.modules import passive_scanner

@@ -5,8 +5,9 @@ Tamper Script Engine - sqlmap-style payload transformation chain
 import re
 import random
 import base64
+import threading
 import urllib.parse
-from typing import Callable, List, Optional, Dict
+from typing import Callable, List, Optional, Dict, Set
 from app.utils.logger import get_logger
 
 logger = get_logger("tamper")
@@ -323,11 +324,13 @@ def securespherebypass(payload: str, **kwargs) -> str:
 
 @TamperRegistry.register("suffixeappend", "general", "Append random suffix")
 def suffixeappend(payload: str, **kwargs) -> str:
-    return f"{payload} {random.choice(['--', '#', '/*', \" AND '1'='1\", \" OR '1'='1'\"])}"
+    suffixes = ['--', '#', '/*', " AND '1'='1", " OR '1'='1'"]
+    return f"{payload} {random.choice(suffixes)}"
 
 @TamperRegistry.register("prefixappend", "general", "Prepend random prefix")
 def prefixappend(payload: str, **kwargs) -> str:
-    return f"{random.choice([\"' \", ') ', '\" ', \"') \", '\") '])}{payload}"
+    prefixes = ["' ", ') ', '" ', "') ", '") ']
+    return f"{random.choice(prefixes)}{payload}"
 
 @TamperRegistry.register("misunion", "mysql", "Misleading UNION SELECT")
 def misunion(payload: str, **kwargs) -> str:
@@ -753,20 +756,131 @@ def nestedcomment(payload: str, **kwargs) -> str:
     return payload.replace(" ", "/**`/**/").replace(" ", "`/**/")
 
 
+WAF_TAMPER_MAP: Dict[str, List[str]] = {
+    "cloudflare": ["space2comment", "randomcase", "versionedkeywords", "cloudflareconcat", "encoding_chain"],
+    "modsecurity": ["space2hash", "randomcase", "modsecurityversioned", "charunicodeencode", "nestedcomment"],
+    "imperva": ["space2dash", "between", "impervacharencode", "chardoubleencode", "space2randomblank"],
+    "incapsula": ["space2dash", "between", "impervacharencode", "chardoubleencode", "space2randomblank"],
+    "f5": ["space2tab", "multiplespaces", "greatest", "symboliclogical", "space2mssqlblank"],
+    "f5 big-ip asm": ["space2tab", "multiplespaces", "greatest", "symboliclogical", "space2mssqlblank"],
+    "akamai": ["space2comment", "equaltolike", "randomcase", "charencode", "space2morecomment"],
+    "barracuda": ["space2hash", "between", "lowercase", "base64encode", "space2randomblank"],
+    "fortiweb": ["space2dash", "multiplespaces", "randomcase", "space2comment", "space2morehash"],
+    "aws waf": ["space2comment", "apostrophemask", "charunicodeencode", "chardoubleencode", "space2mysqlblank"],
+    "safedog": ["space2comment", "multiplespaces", "lowercase", "space2randomblank", "versionedmorekeywords"],
+    "yundun": ["space2hash", "versionedkeywords", "randomcase", "space2mysqlblank", "chardoubleencode"],
+    "chuangyu": ["space2comment", "multiplespaces", "lowercase", "space2randomblank", "space2morecomment"],
+    "baidu yunjiasu": ["space2dash", "randomcase", "space2morecomment", "symboliclogical", "space2randomblank"],
+    "360 wangzhan weishi": ["space2comment", "randomcase", "space2morehash", "space2randomblank"],
+    "sucuri": ["space2comment", "randomcase", "base64encode", "space2mysqlblank"],
+    "wordfence": ["space2hash", "randomcase", "space2morecomment", "chardoubleencode"],
+    "wallarm": ["space2comment", "multiplespaces", "versionedkeywords", "space2randomblank"],
+    "radware": ["space2dash", "randomcase", "space2morecomment", "space2mysqlblank"],
+    "denyall": ["space2hash", "between", "lowercase", "space2randomblank"],
+    "distil": ["space2comment", "randomcase", "space2morehash", "chardoubleencode"],
+    "citrix netscaler": ["space2tab", "multiplespaces", "greatest", "symboliclogical"],
+    "generic": ["space2comment", "randomcase", "versionedkeywords", "space2randomblank"],
+}
+
+WAF_TAMPER_PRIORITY: Dict[str, List[str]] = {
+    "sql_injection": ["space2comment", "randomcase", "versionedkeywords", "space2randomblank",
+                      "equaltolike", "between", "greatest", "symboliclogical", "charunicodeencode"],
+    "xss": ["space2comment", "randomcase", "htmlencode", "charunicodeencode", "space2hash"],
+    "command_injection": ["space2comment", "space2hash", "space2dash", "nullbyte", "space2randomblank"],
+    "path_traversal": ["space2comment", "chardoubleencode", "space2hash", "nullbyte"],
+    "file_inclusion": ["space2comment", "chardoubleencode", "nullbyte", "space2hash"],
+    "ssrf": ["space2comment", "chardoubleencode", "space2hash", "space2randomblank"],
+    "xxe": ["space2comment", "charunicodeencode", "htmlencode", "space2hash"],
+    "deserialization": ["space2comment", "base64encode", "chardoubleencode", "space2randomblank"],
+    "generic": ["space2comment", "randomcase", "versionedkeywords", "space2randomblank"],
+}
+
+
+class IntelligentTamperSelector:
+    _instance: Optional["IntelligentTamperSelector"] = None
+    _lock = threading.Lock()
+    _chain_cache: Dict[str, TamperChain] = {}
+    _cache_max = 64
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._chain_cache = {}
+        return cls._instance
+
+    def select(self, waf_name: Optional[str] = None,
+               attack_type: Optional[str] = None,
+               custom_tampers: Optional[List[str]] = None) -> TamperChain:
+        if custom_tampers:
+            return TamperChain(custom_tampers)
+
+        cache_key = f"{waf_name or 'none'}:{attack_type or 'generic'}"
+        if cache_key in self._chain_cache:
+            return self._chain_cache[cache_key]
+
+        selected: List[str] = []
+
+        if waf_name:
+            waf_lower = waf_name.lower()
+            for waf_key, tampers in WAF_TAMPER_MAP.items():
+                if waf_key in waf_lower or waf_lower in waf_key:
+                    selected.extend(tampers)
+                    break
+            else:
+                selected.extend(WAF_TAMPER_MAP["generic"])
+
+        if attack_type and attack_type in WAF_TAMPER_PRIORITY:
+            priority_tampers = WAF_TAMPER_PRIORITY[attack_type]
+            for t in priority_tampers:
+                if t not in selected:
+                    selected.append(t)
+
+        if not selected:
+            selected = WAF_TAMPER_MAP["generic"]
+
+        seen: set = set()
+        unique = []
+        for t in selected:
+            if t not in seen:
+                seen.add(t)
+                unique.append(t)
+
+        chain = TamperChain(unique)
+
+        if len(self._chain_cache) >= self._cache_max:
+            self._chain_cache.clear()
+        self._chain_cache[cache_key] = chain
+
+        return chain
+
+    def get_attack_type_for_category(self, category: str) -> str:
+        category_lower = category.lower()
+        attack_map = {
+            "sql": "sql_injection", "sqli": "sql_injection", "sql_injection": "sql_injection",
+            "xss": "xss", "cross_site_scripting": "xss",
+            "rce": "command_injection", "command_injection": "command_injection",
+            "lfi": "file_inclusion", "file_inclusion": "file_inclusion",
+            "path_traversal": "path_traversal",
+            "ssrf": "ssrf",
+            "xxe": "xxe",
+            "deserialization": "deserialization",
+        }
+        for key, atype in attack_map.items():
+            if key in category_lower:
+                return atype
+        return "generic"
+
+    def clear_cache(self):
+        with self._lock:
+            self._chain_cache.clear()
+
+
 def get_tamper_chain_for_waf(waf_name: str) -> TamperChain:
-    waf_chains = {
-        "cloudflare": ["space2comment", "randomcase", "versionedkeywords", "cloudflareconcat"],
-        "modsecurity": ["space2hash", "randomcase", "modsecurityversioned", "charunicodeencode"],
-        "imperva": ["space2dash", "between", "impervacharencode", "chardoubleencode"],
-        "f5": ["space2tab", "multiplespaces", "greatest", "symboliclogical"],
-        "akamai": ["space2comment", "equaltolike", "randomcase", "charencode"],
-        "barracuda": ["space2hash", "between", "lowercase", "base64encode"],
-        "fortiweb": ["space2dash", "multiplespaces", "randomcase", "space2comment"],
-        "aws": ["space2comment", "apostrophemask", "charunicodeencode", "chardoubleencode"],
-        "aliyun": ["space2hash", "versionedkeywords", "randomcase", "space2mysqlblank"],
-        "tencent": ["space2comment", "multiplespaces", "lowercase", "space2randomblank"],
-        "baidu": ["space2dash", "randomcase", "space2morecomment", "symboliclogical"],
-        "generic": ["space2comment", "randomcase", "versionedkeywords", "space2randomblank"],
-    }
-    chain = waf_chains.get(waf_name.lower(), waf_chains["generic"])
-    return TamperChain(chain)
+    selector = IntelligentTamperSelector()
+    return selector.select(waf_name=waf_name)
+
+
+def get_intelligent_tamper_selector() -> IntelligentTamperSelector:
+    return IntelligentTamperSelector()

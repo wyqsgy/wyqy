@@ -2,6 +2,63 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 30000 })
 
+const pendingRequests = new Map()
+const responseCache = new Map()
+const CACHE_TTL = 30000
+
+function getCacheKey(config) {
+  return `${config.method}:${config.url}:${JSON.stringify(config.params || {})}`
+}
+
+api.interceptors.request.use((config) => {
+  const key = getCacheKey(config)
+
+  if (config.method === 'get') {
+    const cached = responseCache.get(key)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      config.adapter = () => Promise.resolve(cached.response)
+      return config
+    }
+  }
+
+  if (pendingRequests.has(key)) {
+    config.adapter = () => pendingRequests.get(key)
+    return config
+  }
+
+  return config
+})
+
+api.interceptors.response.use(
+  (response) => {
+    const key = getCacheKey(response.config)
+    pendingRequests.delete(key)
+
+    if (response.config.method === 'get') {
+      responseCache.set(key, {
+        response: { ...response },
+        timestamp: Date.now(),
+      })
+      if (responseCache.size > 100) {
+        const firstKey = responseCache.keys().next().value
+        responseCache.delete(firstKey)
+      }
+    }
+
+    return response
+  },
+  (error) => {
+    const key = error.config ? getCacheKey(error.config) : null
+    if (key) pendingRequests.delete(key)
+    return Promise.reject(error)
+  }
+)
+
+export function clearApiCache() {
+  responseCache.clear()
+  pendingRequests.clear()
+}
+
 export const createTask = (data) => api.post('/tasks', data)
 export const getTasks = (params) => api.get('/tasks', { params })
 export const getTask = (taskId) => api.get(`/tasks/${taskId}`)

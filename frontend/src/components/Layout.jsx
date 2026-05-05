@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useCallback } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { useTheme } from '../contexts/ThemeContext'
 import ThemeSwitcher from './ThemeSwitcher'
+import { useKeyboardShortcuts, KeyboardHelpModal } from '../hooks/useKeyboardShortcuts.jsx'
 
 const navItems = [
   { to: '/', icon: '~', label: '仪表盘' },
@@ -12,23 +14,24 @@ const navItems = [
   { to: '/attack', icon: '*', label: '攻击引擎' },
   { to: '/pocs', icon: '$', label: 'POC管理' },
   { to: '/verify', icon: '?', label: 'AI验证' },
+  { to: '/templates', icon: '&', label: '检测模板' },
   { to: '/settings', icon: '%', label: '系统设置' },
 ]
 
-const THEME_KEY = 'wyqyan-theme'
-
 export default function Layout() {
-  const [theme, setTheme] = useState(() => {
-    return localStorage.getItem(THEME_KEY) || 'matrix'
-  })
+  const { theme, setTheme } = useTheme()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-
-  useEffect(() => {
-    localStorage.setItem(THEME_KEY, theme)
-    document.body.className = `theme-${theme}`
-  }, [theme])
+  const [helpOpen, setHelpOpen] = useState(false)
 
   const closeSidebar = () => setSidebarOpen(false)
+
+  const handleHelp = useCallback(() => setHelpOpen(true), [])
+  const handleEscape = useCallback(() => {
+    setSidebarOpen(false)
+    setHelpOpen(false)
+  }, [])
+
+  useKeyboardShortcuts({ onHelp: handleHelp, onEscape: handleEscape })
 
   const sidebarContent = (
     <>
@@ -184,6 +187,8 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      <KeyboardHelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   )
 }

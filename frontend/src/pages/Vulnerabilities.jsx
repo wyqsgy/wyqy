@@ -35,29 +35,33 @@ export default function Vulnerabilities() {
 
       const results = {}
       items.forEach(v => {
+        const vr = {
+          verification_result: v.verification_result || '',
+          confidence_score: v.confidence_score || 0,
+          false_positive_reason: v.false_positive_reason || '',
+          verification_evidences: v.verification_evidences || [],
+        }
+
         if (v.ai_analysis) {
           try {
             const parsed = typeof v.ai_analysis === 'string' ? JSON.parse(v.ai_analysis) : v.ai_analysis
-            results[v.vuln_id] = {
-              is_vulnerable: parsed.is_vulnerable ?? (v.ai_confidence >= 70),
-              vulnerability_type: parsed.vulnerability_type || '',
-              confidence: parsed.confidence !== undefined ? Math.round(parsed.confidence * 100) : v.ai_confidence,
-              risk_level: parsed.risk_level || v.risk_level,
-              evidence_summary: parsed.evidence_summary || '',
-              matched_patterns: parsed.matched_patterns || [],
-              cve_ids: parsed.cve_ids || [],
-              cvss_score: parsed.cvss_score || 0,
-              remediation: parsed.remediation || '',
-              is_confirmed: v.is_confirmed,
-            }
+            vr.is_vulnerable = parsed.is_vulnerable ?? (v.ai_confidence >= 70)
+            vr.vulnerability_type = parsed.vulnerability_type || ''
+            vr.confidence = parsed.confidence !== undefined ? Math.round(parsed.confidence * 100) : v.ai_confidence
+            vr.risk_level = parsed.risk_level || v.risk_level
+            vr.evidence_summary = parsed.evidence_summary || ''
+            vr.matched_patterns = parsed.matched_patterns || []
+            vr.cve_ids = parsed.cve_ids || []
+            vr.cvss_score = parsed.cvss_score || 0
+            vr.remediation = parsed.remediation || ''
+            vr.is_confirmed = v.is_confirmed
           } catch (e) {
-            results[v.vuln_id] = {
-              is_vulnerable: v.ai_confidence >= 70,
-              confidence: v.ai_confidence,
-              is_confirmed: v.is_confirmed,
-            }
+            vr.is_vulnerable = v.ai_confidence >= 70
+            vr.confidence = v.ai_confidence
+            vr.is_confirmed = v.is_confirmed
           }
         }
+        results[v.vuln_id] = vr
       })
       setVerifyResults(results)
     } catch (e) {
@@ -74,13 +78,35 @@ export default function Vulnerabilities() {
       const data = res.data.data
       setVerifyResults(prev => ({
         ...prev,
-        [vulnId]: data,
+        [vulnId]: { ...prev[vulnId], ...data },
       }))
       setVulns(prev => prev.map(v =>
         v.vuln_id === vulnId ? { ...v, ai_confidence: data.confidence, is_confirmed: data.is_confirmed } : v
       ))
     } catch (e) {
       alert('AI验证失败: ' + (e.response?.data?.detail || e.message))
+    }
+    setVerifyingIds(prev => ({ ...prev, [vulnId]: false }))
+  }
+
+  const handleDeepVerify = async (vulnId) => {
+    setVerifyingIds(prev => ({ ...prev, [vulnId]: true }))
+    try {
+      const res = await api.post(`/verify/vulnerability/${vulnId}`)
+      const data = res.data.data
+      setVerifyResults(prev => ({
+        ...prev,
+        [vulnId]: {
+          ...prev[vulnId],
+          verification_result: data.result,
+          confidence_score: data.confidence_score,
+          false_positive_reason: data.false_positive_reason,
+          verification_evidences: data.evidences || [],
+          recommendations: data.recommendations || [],
+        },
+      }))
+    } catch (e) {
+      alert('深度验证失败: ' + (e.response?.data?.detail || e.message))
     }
     setVerifyingIds(prev => ({ ...prev, [vulnId]: false }))
   }
@@ -206,7 +232,59 @@ export default function Vulnerabilities() {
                       <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}>
                         {v.module || '-'}
                       </span>
-                      {vr?.is_confirmed === 1 && (
+                      {vr?.verification_result === 'confirmed' && (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: 'var(--danger-subtle)',
+                          color: 'var(--danger)',
+                        }}>
+                          ⚠ 已确认 ({vr.confidence_score}%)
+                        </span>
+                      )}
+                      {vr?.verification_result === 'likely' && (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: 'var(--warning-subtle)',
+                          color: 'var(--warning)',
+                        }}>
+                          ~ 疑似漏洞 ({vr.confidence_score}%)
+                        </span>
+                      )}
+                      {vr?.verification_result === 'uncertain' && (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: 'var(--info-subtle)',
+                          color: 'var(--info)',
+                        }}>
+                          ? 不确定 ({vr.confidence_score}%)
+                        </span>
+                      )}
+                      {vr?.verification_result === 'false_positive' && (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: 'var(--success-subtle)',
+                          color: 'var(--success)',
+                        }}>
+                          ✓ 误报 ({vr.confidence_score}%)
+                        </span>
+                      )}
+                      {vr?.is_confirmed === 1 && !vr?.verification_result && (
                         <span style={{
                           display: 'inline-block',
                           padding: '2px 8px',
@@ -219,7 +297,7 @@ export default function Vulnerabilities() {
                           ✓ AI已确认
                         </span>
                       )}
-                      {vr?.is_confirmed === 0 && vr?.confidence !== undefined && (
+                      {vr?.is_confirmed === 0 && vr?.confidence !== undefined && !vr?.verification_result && (
                         <span style={{
                           display: 'inline-block',
                           padding: '2px 8px',
@@ -246,12 +324,26 @@ export default function Vulnerabilities() {
 
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
                     {vr ? (
-                      <button
-                        style={vr.is_vulnerable ? btnDangerStyle : btnVerifiedStyle}
-                        onClick={() => setExpandedId(isExpanded ? null : v.vuln_id)}
-                      >
-                        {vr.is_vulnerable ? `⚠ AI确认 ${vr.confidence}%` : `✓ 可信 ${vr.confidence}%`}
-                      </button>
+                      <>
+                        <button
+                          style={vr.is_vulnerable ? btnDangerStyle : btnVerifiedStyle}
+                          onClick={() => setExpandedId(isExpanded ? null : v.vuln_id)}
+                        >
+                          {vr.is_vulnerable ? `⚠ AI确认 ${vr.confidence}%` : `✓ 可信 ${vr.confidence}%`}
+                        </button>
+                        <button
+                          style={{
+                            ...btnStyle,
+                            background: 'var(--accent)',
+                            color: '#fff',
+                            border: 'none',
+                          }}
+                          onClick={() => handleDeepVerify(v.vuln_id)}
+                          disabled={isVerifying}
+                        >
+                          {isVerifying ? '🔄 验证中...' : '🔍 深度验证'}
+                        </button>
+                      </>
                     ) : (
                       <button
                         style={btnStyle}
@@ -315,6 +407,60 @@ export default function Vulnerabilities() {
                         </div>
                       )}
                     </div>
+
+                    {vr.verification_result && (
+                      <div style={{
+                        marginBottom: '10px',
+                        padding: '10px',
+                        background: vr.verification_result === 'confirmed' ? 'var(--danger-subtle)' :
+                                     vr.verification_result === 'false_positive' ? 'var(--success-subtle)' :
+                                     vr.verification_result === 'likely' ? 'var(--warning-subtle)' : 'var(--bg-card)',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                      }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          深度验证结果
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text-bright)' }}>
+                          {vr.verification_result === 'confirmed' && `⚠ 已确认为真实漏洞（置信度: ${vr.confidence_score}%）`}
+                          {vr.verification_result === 'likely' && `~ 疑似漏洞（置信度: ${vr.confidence_score}%）`}
+                          {vr.verification_result === 'uncertain' && `? 无法确定（置信度: ${vr.confidence_score}%）`}
+                          {vr.verification_result === 'false_positive' && `✓ 判定为误报（置信度: ${vr.confidence_score}%）`}
+                        </div>
+                        {vr.false_positive_reason && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                            原因: {vr.false_positive_reason}
+                          </div>
+                        )}
+                        {vr.verification_evidences?.length > 0 && (
+                          <div style={{ marginTop: '8px' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px' }}>验证证据:</div>
+                            {vr.verification_evidences.map((e, i) => (
+                              <div key={i} style={{
+                                fontSize: '11px',
+                                color: e.supports_finding ? 'var(--danger)' : 'var(--success)',
+                                padding: '3px 0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}>
+                                <span>{e.supports_finding ? '⚠' : '✓'}</span>
+                                <span>{e.description}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {vr.recommendations?.length > 0 && (
+                          <div style={{ marginTop: '8px' }}>
+                            {vr.recommendations.map((r, i) => (
+                              <div key={i} style={{ fontSize: '11px', color: 'var(--info)', padding: '2px 0' }}>
+                                💡 {r}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div style={{ marginBottom: '8px' }}>
                       <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>证据摘要</div>

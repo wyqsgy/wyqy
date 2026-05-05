@@ -43,6 +43,15 @@ class BaseScanner(ABC):
     def __init__(self, target: str):
         self.target = target.rstrip("/")
         self.results: list[VulnResult] = []
+        self._tamper_chain = None
+
+    def set_tamper_chain(self, chain):
+        self._tamper_chain = chain
+
+    def tamper_payload(self, payload: str) -> str:
+        if self._tamper_chain:
+            return self._tamper_chain.transform(payload)
+        return payload
 
     @abstractmethod
     def check(self) -> bool:
