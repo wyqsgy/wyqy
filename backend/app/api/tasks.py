@@ -1,153 +1,104 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models.task import ScanTask, TaskStatus
-from app.scanner.engine import start_scan, stop_scan
-from app.scanner.loader import get_registered_categories
-from app.utils.helper import gen_task_id
-
-router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+from typing import Optional
+from sqlalchemy import String, DateTime, Integer, Text, Float, ForeignKey, JSON
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import Base, async_session_maker
 
 
-class CreateTaskRequest(BaseModel):
-    target: str
-    categories: list[str] = ["all"]
-    scan_type: str = "quick"
-    modules: list[str] | None = None
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    target: Mapped[str] = mapped_column(String(512), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    scan_type: Mapped[str] = mapped_column(String(50), default="quick")
+    options: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    vulnerability_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    logs: Mapped[list["TaskLog"]] = relationship("TaskLog", back_populates="task", cascade="all, delete-orphan")
 
 
-class TaskResponse(BaseModel):
-    task_id: str
-    target: str
-    categories: list
-    status: str
-    progress: int
-    total_checks: int
-    vuln_count: int
-    critical_count: int
-    high_count: int
-    medium_count: int
-    low_count: int
-    created_at: str
-    finished_at: str | None
+class TaskLog(Base):
+    __tablename__ = "task_logs"
 
-    class Config:
-        from_attributes = True
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(36), ForeignKey("tasks.id", ondelete="CASCADE"))
+    level: Mapped[str] = mapped_column(String(20), default="info")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    task: Mapped["Task"] = relationship("Task", back_populates="logs")
 
 
-@router.post("")
-def create_task(req: CreateTaskRequest, db: Session = Depends(get_db)):
-    task_id = gen_task_id()
-
-    categories = req.categories
-    if req.modules:
-        categories = req.modules
-    elif req.scan_type == "recon":
-        categories = ["recon"]
-    elif req.scan_type == "stealth":
-        categories = ["all"]
-
-    task = ScanTask(
-        task_id=task_id,
-        target=req.target,
-        categories=categories,
-        status=TaskStatus.PENDING,
+async def create_task(db: AsyncSession, name: str, target: str, scan_type: str, **options) -> Task:
+    import uuid
+    task = Task(
+        id=str(uuid.uuid4()),
+        name=name,
+        target=target,
+        scan_type=scan_type,
+        options=options,
     )
     db.add(task)
-    db.commit()
-    db.refresh(task)
-
-    start_scan(task_id, req.target, categories, scan_mode=req.scan_type)
-
-    return {
-        "code": 200,
-        "message": "Scan task created",
-        "data": {"task_id": task_id, "target": req.target, "status": "pending"},
-    }
+    await db.commit()
+    await db.refresh(task)
+    return task
 
 
-@router.get("")
-def list_tasks(skip: int = 0, limit: int = 20, status: str = None, db: Session = Depends(get_db)):
-    query = db.query(ScanTask).order_by(ScanTask.created_at.desc())
+async def get_tasks(db: AsyncSession, skip: int = 0, limit: int = 50, status: Optional[str] = None) -> tuple[list[Task], int]:
+    from sqlalchemy import select, func, desc
+
+    query = select(Task).order_by(desc(Task.created_at))
+    count_query = select(func.count(Task.id))
+
     if status:
-        query = query.filter(ScanTask.status == status)
-    total = query.count()
-    tasks = query.offset(skip).limit(limit).all()
+        query = query.where(Task.status == status)
+        count_query = count_query.where(Task.status == status)
 
-    task_list = []
-    for t in tasks:
-        task_list.append({
-            "task_id": t.task_id,
-            "target": t.target,
-            "categories": t.categories or [],
-            "status": t.status.value if isinstance(t.status, TaskStatus) else t.status,
-            "progress": t.progress,
-            "total_checks": t.total_checks,
-            "vuln_count": t.vuln_count,
-            "critical_count": t.critical_count,
-            "high_count": t.high_count,
-            "medium_count": t.medium_count,
-            "low_count": t.low_count,
-            "created_at": str(t.created_at) if t.created_at else None,
-            "finished_at": str(t.finished_at) if t.finished_at else None,
-        })
+    query = query.offset(skip).limit(limit)
 
-    return {"code": 200, "data": {"total": total, "items": task_list}}
+    result = await db.execute(query)
+    tasks = result.scalars().all()
+
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    return list(tasks), total
 
 
-@router.get("/categories")
-def list_categories():
-    cats = get_registered_categories()
-    return {"code": 200, "data": cats}
+async def get_task(db: AsyncSession, task_id: str) -> Optional[Task]:
+    from sqlalchemy import select
+    result = await db.execute(select(Task).where(Task.id == task_id))
+    return result.scalar_one_or_none()
 
 
-@router.get("/{task_id}")
-def get_task(task_id: str, db: Session = Depends(get_db)):
-    task = db.query(ScanTask).filter(ScanTask.task_id == task_id).first()
+async def update_task(db: AsyncSession, task_id: str, **kwargs) -> Optional[Task]:
+    task = await get_task(db, task_id)
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        return None
 
-    return {
-        "code": 200,
-        "data": {
-            "task_id": task.task_id,
-            "target": task.target,
-            "categories": task.categories or [],
-            "status": task.status.value if isinstance(task.status, TaskStatus) else task.status,
-            "progress": task.progress,
-            "total_checks": task.total_checks,
-            "vuln_count": task.vuln_count,
-            "critical_count": task.critical_count,
-            "high_count": task.high_count,
-            "medium_count": task.medium_count,
-            "low_count": task.low_count,
-            "fingerprint": task.fingerprint or {},
-            "error_msg": task.error_msg or "",
-            "created_at": str(task.created_at) if task.created_at else None,
-            "finished_at": str(task.finished_at) if task.finished_at else None,
-        },
-    }
+    for key, value in kwargs.items():
+        if hasattr(task, key):
+            setattr(task, key, value)
+
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(task)
+    return task
 
 
-@router.post("/{task_id}/stop")
-def stop_task(task_id: str, db: Session = Depends(get_db)):
-    task = db.query(ScanTask).filter(ScanTask.task_id == task_id).first()
+async def delete_task(db: AsyncSession, task_id: str) -> bool:
+    task = await get_task(db, task_id)
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        return False
 
-    stop_scan(task_id)
-    return {"code": 200, "message": "Stop signal sent"}
-
-
-@router.delete("/{task_id}")
-def delete_task(task_id: str, db: Session = Depends(get_db)):
-    task = db.query(ScanTask).filter(ScanTask.task_id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    stop_scan(task_id)
-    db.delete(task)
-    db.commit()
-    return {"code": 200, "message": "Task deleted"}
+    await db.delete(task)
+    await db.commit()
+    return True

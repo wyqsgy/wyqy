@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build: ./backend
@@ -9,10 +7,20 @@ services:
     volumes:
       - wyqy-data:/app/data
     environment:
-      - DATABASE_URL=sqlite:////app/data/wyqy.db
-      - HTTP_TIMEOUT=10
-      - MAX_CONCURRENT_SCANS=5
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/wyqy.db
+      - HTTP_TIMEOUT=30
+      - MAX_CONCURRENT_SCANS=10
+      - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379/0
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -22,6 +30,26 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: wyqy-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
-  wyqyan-data:
+  wyqy-data:
+  redis-data:

@@ -1,24 +1,26 @@
-import warnings
-warnings.filterwarnings("ignore", message="Unverified HTTPS request")
-
+from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import init_db
-from app.api import tasks, scans, reports, ws, export, cve, attack, recon, settings, pocs, verify, correlation, templates
-from app.middleware.exceptions import global_exception_handler
-from app.middleware.request_logger import request_logger_middleware
-from app.utils.logger import get_logger
+from app.database import engine, init_db
+from app.api import tasks, vulnerabilities, reports, scans, recon, attack, templates, settings, pocs, verify, export, ws, cve, correlation
+from app.middleware.exceptions import ExceptionMiddleware
+from app.middleware.request_logger import RequestLoggerMiddleware
 
-logger = get_logger("wyqyan")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    await init_db()
+    yield
+    await engine.dispose()
+
 
 app = FastAPI(
-    title="WyqYan",
-    description="AI驱动的框架/中间件漏洞集合自动化验证平台",
-    version="1.0.0",
+    title="Superpowers Security Scanner API",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-app.middleware("http")(request_logger_middleware)
-app.add_exception_handler(Exception, global_exception_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,37 +29,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(tasks.router)
-app.include_router(scans.router)
-app.include_router(reports.router)
-app.include_router(ws.router)
-app.include_router(export.router)
-app.include_router(cve.router)
-app.include_router(attack.router)
-app.include_router(recon.router)
-app.include_router(settings.router)
-app.include_router(pocs.router)
-app.include_router(verify.router)
-app.include_router(correlation.router)
-app.include_router(templates.router)
+app.add_middleware(RequestLoggerMiddleware)
+app.add_middleware(ExceptionMiddleware)
+
+app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(vulnerabilities.router, prefix="/api/vulnerabilities", tags=["vulnerabilities"])
+app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
+app.include_router(scans.router, prefix="/api/scans", tags=["scans"])
+app.include_router(recon.router, prefix="/api/recon", tags=["recon"])
+app.include_router(attack.router, prefix="/api/attack", tags=["attack"])
+app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
+app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(pocs.router, prefix="/api/pocs", tags=["pocs"])
+app.include_router(verify.router, prefix="/api/verify", tags=["verify"])
+app.include_router(export.router, prefix="/api/export", tags=["export"])
+app.include_router(ws.router, prefix="/ws", tags=["websocket"])
+app.include_router(cve.router, prefix="/api/cve", tags=["cve"])
+app.include_router(correlation.router, prefix="/api/correlation", tags=["correlation"])
 
 
-@app.on_event("startup")
-def startup():
-    init_db()
-    logger.info("WyqYan started successfully")
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "version": "2.0.0"}
 
 
 @app.get("/")
-def root():
-    return {
-        "name": "WyqYan",
-        "version": "1.0.0",
-        "description": "AI驱动的框架/中间件漏洞集合自动化验证平台",
-        "docs": "/docs",
-    }
-
-
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
+async def root():
+    return {"message": "Superpowers Security Scanner API", "version": "2.0.0"}
